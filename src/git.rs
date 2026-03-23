@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use git2::Repository;
 use std::process::Command;
 
 /// 获取指定远程的所有远程分支名称
@@ -21,8 +20,9 @@ pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
             if line.contains("->") {
                 continue;
             }
-            // 只包含指定远程的分支
-            if line.starts_with(remote_name) {
+            // 精确匹配：必须是 "origin/xxx" 格式，且 remote_name 后面要有 /
+            let prefix = format!("{}/", remote_name);
+            if line.starts_with(&prefix) && line.len() > prefix.len() {
                 branches.push(line.to_string());
             }
         }
@@ -32,6 +32,16 @@ pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
     }
 
     Ok(branches)
+}
+
+/// 后台 fetch 远程仓库（异步更新）
+pub fn fetch_remote_async(remote_name: &str) {
+    let remote_name = remote_name.to_string();
+    std::thread::spawn(move || {
+        let _ = Command::new("git")
+            .args(["fetch", &remote_name, "--prune", "--quiet"])
+            .output();
+    });
 }
 
 /// 获取所有本地分支的短名称
@@ -61,26 +71,28 @@ pub fn list_local_branches() -> Result<Vec<String>> {
 /// remote_ref: 远程分支引用，如 "origin/feature/login"
 /// branch_name: 新本地分支名称，如 "feature/login"
 pub fn create_local_branch(remote_ref: &str, branch_name: &str) -> Result<()> {
-    let repo = Repository::discover(".")
-        .context("当前目录不是 git 仓库")?;
+    // 使用 git 命令创建，更可靠
+    // 先检查远程引用是否存在
+    let check_output = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/remotes/{}", remote_ref)])
+        .output();
 
-    // 查找远程引用
-    let remote_oid = repo
-        .find_reference(remote_ref)
-        .context(format!("找不到远程分支引用：{}", remote_ref))?
-        .target()
-        .context("无法获取远程分支的 commit")?;
-
-    // 创建本地分支
-    let commit = repo.find_commit(remote_oid)?;
-
-    // 检查分支是否已存在
-    if repo.find_branch(branch_name, git2::BranchType::Local).is_ok() {
-        anyhow::bail!("本地分支 '{}' 已存在", branch_name);
+    if let Ok(output) = check_output {
+        if !output.status.success() {
+            anyhow::bail!("远程分支引用 '{}' 不存在，请先执行 'git fetch'", remote_ref);
+        }
     }
 
-    // 创建分支
-    repo.branch(branch_name, &commit, false)?;
+    // 使用 git checkout -b 创建并跟踪远程分支
+    let output = Command::new("git")
+        .args(["checkout", "-b", branch_name, "--track", &remote_ref])
+        .output()
+        .context("执行 git checkout 命令失败")?;
 
-    Ok(())
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("创建分支失败：{}", stderr.trim())
+    }
 }

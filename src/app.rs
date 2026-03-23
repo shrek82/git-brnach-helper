@@ -1,5 +1,6 @@
 use crate::git;
 use anyhow::Result;
+use chrono::Local;
 
 /// 表示一个远程分支及其对应的本地分支状态
 #[derive(Clone, Debug)]
@@ -26,6 +27,8 @@ pub struct App {
     pub status_message: String,
     /// 远程仓库名称（默认 "origin"）
     pub remote_name: String,
+    /// 操作历史记录（最多保留 10 条）
+    pub operation_log: Vec<String>,
 }
 
 impl App {
@@ -35,6 +38,17 @@ impl App {
             cursor: 0,
             status_message: String::from("就绪 - 按 'r' 刷新，'q' 退出"),
             remote_name: String::from("origin"),
+            operation_log: Vec::new(),
+        }
+    }
+
+    /// 添加操作日志
+    fn add_log(&mut self, message: &str) {
+        let timestamp = Local::now().format("%H:%M:%S").to_string();
+        self.operation_log.insert(0, format!("[{}] {}", timestamp, message));
+        // 保留最多 10 条记录
+        if self.operation_log.len() > 10 {
+            self.operation_log.truncate(10);
         }
     }
 
@@ -86,6 +100,7 @@ impl App {
 
         let count = self.remote_branches.len();
         self.status_message = format!("共 {} 个远程分支", count);
+        self.add_log(&format!("刷新分支列表，共 {} 个远程分支", count));
 
         Ok(())
     }
@@ -114,7 +129,9 @@ impl App {
             branch.selected = !branch.selected;
 
             let status = if branch.selected { "已选中" } else { "已取消" };
-            self.status_message = format!("{}: {}", branch.short_name, status);
+            let short_name = branch.short_name.clone();
+            self.status_message = format!("{}: {}", short_name, status);
+            self.add_log(&format!("{}分支：{}", short_name, status));
         }
     }
 
@@ -136,6 +153,8 @@ impl App {
         } else {
             String::from("已全选")
         };
+        let log_msg = self.status_message.clone();
+        self.add_log(&log_msg);
     }
 
     /// 创建所有选中的分支
@@ -175,14 +194,18 @@ impl App {
         }
 
         self.status_message = if failed_branches.is_empty() {
-            format!("成功创建 {} 个分支", success_count)
+            let msg = format!("成功创建 {} 个分支", success_count);
+            self.add_log(&msg);
+            msg
         } else {
-            format!(
+            let msg = format!(
                 "成功 {} 个，失败 {} 个：{}",
                 success_count,
                 failed_branches.len(),
                 failed_branches.join(", ")
-            )
+            );
+            self.add_log(&msg);
+            msg
         };
 
         Ok(())
