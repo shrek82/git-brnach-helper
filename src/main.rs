@@ -47,13 +47,16 @@ fn run_app<B: ratatui::prelude::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
-    // 初始化：获取分支列表（不等待 fetch）
-    app.refresh_branches()?;
+    // 初始化：异步加载分支列表（非阻塞）
+    app.start_loading_branches();
 
     // 后台异步 fetch 更新远程引用
     git::fetch_remote_async(&app.remote_name);
 
     loop {
+        // 每帧检查加载是否完成
+        app.poll_loading_complete()?;
+
         terminal.draw(|f| ui::draw(f, app))?;
 
         match event::read()? {
@@ -111,10 +114,9 @@ fn run_app<B: ratatui::prelude::Backend>(
                             app.toggle_select_all();
                         }
                         KeyCode::Char('R') | KeyCode::Char('r') => {
-                            // 刷新分支列表（带 fetch）
+                            // 刷新分支列表（异步加载）
+                            app.start_loading_branches();
                             git::fetch_remote_async(&app.remote_name);
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            app.refresh_branches()?;
                         }
                         KeyCode::Enter => {
                             // 显示分支详情弹窗

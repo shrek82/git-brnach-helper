@@ -1,6 +1,7 @@
 use crate::git;
 use anyhow::Result;
 use chrono::Local;
+use std::sync::mpsc;
 
 /// 表示一个远程分支及其对应的本地分支状态
 #[derive(Clone, Debug)]
@@ -19,6 +20,12 @@ pub struct RemoteBranch {
     pub ahead: usize,
     /// 落后远程的提交数（仅当 has_local=true 时有效）
     pub behind: usize,
+    /// 最后提交时间（相对时间，如 "2 天前"）
+    pub last_commit_time: String,
+    /// 最后提交作者
+    pub last_commit_author: String,
+    /// 最后提交消息
+    pub last_commit_message: String,
 }
 
 /// 应用主状态
@@ -61,6 +68,13 @@ pub struct App {
     pub detail_branch_name: String,
     /// 最近提交记录
     pub recent_commits: Vec<String>,
+    // === 懒加载状态 ===
+    /// 是否正在加载分支列表
+    pub is_loading: bool,
+    /// 加载状态消息
+    pub loading_message: String,
+    /// 后台加载任务的接收器
+    pub load_receiver: Option<mpsc::Receiver<Result<Vec<RemoteBranch>>>>,
 }
 
 impl App {
@@ -90,6 +104,9 @@ impl App {
             show_branch_detail: false,
             detail_branch_name: String::new(),
             recent_commits: Vec::new(),
+            is_loading: false,
+            loading_message: String::new(),
+            load_receiver: None,
         }
     }
 
@@ -241,7 +258,7 @@ impl App {
         self.is_operating = true;
         self.progress_total = to_sync.len();
         self.progress_current = 0;
-        self.status_message = format!("正在同步 {} 个分支... [0/{}]", to_sync.len(), to_sync.len());
+        self.loading_message = format!("正在同步 {} 个分支...", to_sync.len());
 
         let mut success_count = 0;
         let mut failed_branches = Vec::new();
@@ -261,6 +278,7 @@ impl App {
         }
 
         self.is_operating = false;
+        self.loading_message.clear();
 
         self.status_message = if failed_branches.is_empty() {
             let msg = format!("成功同步 {} 个分支", success_count);
@@ -290,7 +308,8 @@ impl App {
         }
     }
 
-    /// 刷新分支列表
+    /// 刷新分支列表（保留用于兼容）
+    #[allow(dead_code)]
     pub fn refresh_branches(&mut self) -> Result<()> {
         self.status_message = String::from("正在刷新分支列表...");
 
@@ -325,6 +344,11 @@ impl App {
                 (0, 0)
             };
 
+            // 获取远程分支的最后提交信息
+            let (commit_time, commit_author, commit_message) =
+                git::get_remote_last_commit_info(&remote_ref)
+                    .unwrap_or((String::from("-"), String::from("-"), String::from("-")));
+
             self.all_branches.push(RemoteBranch {
                 remote_ref,
                 short_name,
@@ -333,6 +357,9 @@ impl App {
                 selected: false,
                 ahead,
                 behind,
+                last_commit_time: commit_time,
+                last_commit_author: commit_author,
+                last_commit_message: commit_message,
             });
         }
 
@@ -605,5 +632,172 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// === 懒加载相关方法 ===
+
+impl App {
+    /// 开始异步加载分支列表（非阻塞）
+    pub fn start_loading_branches(&mut self) {
+        self.is_loading = true;
+        self.loading_message = String::from("正在加载分支列表...");
+        self.remote_branches.clear();
+        self.all_branches.clear();
+
+        let remote_name = self.remote_name.clone();
+        let (tx, rx) = mpsc::channel();
+        self.load_receiver = Some(rx);
+
+        std::thread::spawn(move || {
+            // 步骤 1: 获取远程分支引用（不先 fetch，直接从本地缓存读取）
+            match git::list_remote_branches(&remote_name) {
+                Ok(remote_refs) => {
+                    let total = remote_refs.len();
+
+                    // 步骤 2: 获取本地分支
+                    let local_branches = match git::list_local_branches() {
+                        Ok(branches) => branches,
+                        Err(e) => return tx.send(Err(anyhow::anyhow!("获取本地分支失败：{}", e))),
+                    };
+
+                    // 使用 HashSet 加速查找
+                    use std::collections::HashSet;
+                    let local_set: HashSet<&String> = local_branches.iter().collect();
+
+                    // 步骤 3: 构建分支列表（不获取提交信息，快速返回）
+                    let mut branches = Vec::with_capacity(total);
+                    for remote_ref in remote_refs {
+                        let short_name = remote_ref
+                            .strip_prefix(&format!("{}/", remote_name))
+                            .unwrap_or(&remote_ref)
+                            .to_string();
+
+                        let has_local = local_set.contains(&short_name);
+                        let local_name = if has_local { Some(short_name.clone()) } else { None };
+
+                        branches.push(RemoteBranch {
+                            remote_ref,
+                            short_name,
+                            has_local,
+                            local_name,
+                            selected: false,
+                            ahead: 0,
+                            behind: 0,
+                            last_commit_time: String::from("-"),
+                            last_commit_author: String::from("-"),
+                            last_commit_message: String::from("-"),
+                        });
+                    }
+
+                    // 排序
+                    branches.sort_by(|a, b| a.short_name.to_lowercase().cmp(&b.short_name.to_lowercase()));
+                    let _ = tx.send(Ok(branches));
+                }
+                Err(e) => return tx.send(Err(anyhow::anyhow!("获取远程分支失败：{}", e))),
+            }
+            Ok(())
+        });
+    }
+
+    /// 检查异步加载是否完成
+    pub fn poll_loading_complete(&mut self) -> Result<bool> {
+        if !self.is_loading {
+            return Ok(false);
+        }
+
+        if let Some(rx) = self.load_receiver.take() {
+            match rx.try_recv() {
+                Ok(Ok(branches)) => {
+                    self.all_branches = branches;
+                    self.apply_filter();
+                    self.is_loading = false;
+                    self.loading_message.clear();
+                    self.load_ahead_behind_for_visible();
+                    self.status_message = format!("已加载 {} 个分支", self.remote_branches.len());
+                    Ok(true)
+                }
+                Ok(Err(e)) => {
+                    self.is_loading = false;
+                    self.loading_message.clear();
+                    self.status_message = format!("加载失败：{}", e);
+                    Ok(true)
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.load_receiver = Some(rx);
+                    Ok(false)
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.is_loading = false;
+                    self.status_message = String::from("加载线程已断开");
+                    Ok(true)
+                }
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// 懒加载：只为可见区域的分支计算 ahead/behind 和提交信息
+    fn load_ahead_behind_for_visible(&mut self) {
+        let visible_count = std::cmp::min(30, self.all_branches.len());
+
+        // 立即加载可见区域的 ahead/behind（仅已有本地分支）
+        for i in 0..visible_count {
+            if self.all_branches[i].has_local {
+                let (ahead, behind) = git::get_branch_ahead_behind(&self.all_branches[i].short_name)
+                    .unwrap_or((0, 0));
+                self.all_branches[i].ahead = ahead;
+                self.all_branches[i].behind = behind;
+            }
+        }
+
+        // 后台线程：分批加载提交信息和剩余分支的 ahead/behind
+        let mut branches = std::mem::take(&mut self.all_branches);
+
+        std::thread::spawn(move || {
+            // 先加载前 50 个分支的提交信息（快速响应用户看到的区域）
+            let batch_size = std::cmp::min(50, branches.len());
+            for i in 0..batch_size {
+                let commit_info = if branches[i].has_local {
+                    // 有本地分支：获取本地分支的提交信息
+                    git::get_last_commit_info(&branches[i].short_name)
+                        .unwrap_or((String::from("-"), String::from("-"), String::from("-")))
+                } else {
+                    // 无本地分支：获取远程分支的提交信息
+                    git::get_remote_last_commit_info(&branches[i].remote_ref)
+                        .unwrap_or((String::from("-"), String::from("-"), String::from("-")))
+                };
+                branches[i].last_commit_time = commit_info.0;
+                branches[i].last_commit_author = commit_info.1;
+                branches[i].last_commit_message = commit_info.2;
+            }
+
+            // 继续加载剩余分支的 ahead/behind（仅已有本地分支）
+            for i in visible_count..branches.len() {
+                if branches[i].has_local {
+                    if let Ok((ahead, behind)) = git::get_branch_ahead_behind(&branches[i].short_name) {
+                        branches[i].ahead = ahead;
+                        branches[i].behind = behind;
+                    }
+                }
+            }
+
+            // 最后加载剩余分支的提交信息
+            for i in batch_size..branches.len() {
+                let commit_info = if branches[i].has_local {
+                    // 有本地分支：获取本地分支的提交信息
+                    git::get_last_commit_info(&branches[i].short_name)
+                        .unwrap_or((String::from("-"), String::from("-"), String::from("-")))
+                } else {
+                    // 无本地分支：获取远程分支的提交信息
+                    git::get_remote_last_commit_info(&branches[i].remote_ref)
+                        .unwrap_or((String::from("-"), String::from("-"), String::from("-")))
+                };
+                branches[i].last_commit_time = commit_info.0;
+                branches[i].last_commit_author = commit_info.1;
+                branches[i].last_commit_message = commit_info.2;
+            }
+        });
     }
 }

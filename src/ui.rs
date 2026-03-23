@@ -46,6 +46,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.is_operating && app.progress_total > 0 {
         draw_progress(f, app);
     }
+
+    // 绘制 loading 提示（加载或同步时显示）
+    if app.is_loading || app.is_operating {
+        draw_loading(f, app);
+    }
 }
 
 /// 绘制标题栏
@@ -97,18 +102,24 @@ fn draw_branch_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(6),  // 选择
-            Constraint::Length(10), // 状态
-            Constraint::Min(20),    // 远程分支
-            Constraint::Min(20),    // 本地分支
+            Constraint::Length(5),   // 选择
+            Constraint::Length(8),   // 状态
+            Constraint::Min(25),     // 远程分支
+            Constraint::Min(25),     // 本地分支
+            Constraint::Length(12),  // 最后提交
+            Constraint::Length(12),  // 作者
+            Constraint::Min(30),     // 提交消息
         ],
     )
     .header(
         Row::new(vec![
             Cell::from(" 选择 ").style(Style::default().fg(Color::Yellow)),
-            Cell::from(" 操作 ").style(Style::default().fg(Color::Yellow)),
+            Cell::from(" 状态 ").style(Style::default().fg(Color::Yellow)),
             Cell::from(" 远程分支 ").style(Style::default().fg(Color::Yellow)),
             Cell::from(" 本地分支 ").style(Style::default().fg(Color::Yellow)),
+            Cell::from(" 最后提交 ").style(Style::default().fg(Color::Yellow)),
+            Cell::from(" 作者 ").style(Style::default().fg(Color::Yellow)),
+            Cell::from(" 提交消息 ").style(Style::default().fg(Color::Yellow)),
         ])
         .style(
             Style::default()
@@ -191,11 +202,26 @@ fn render_branch_row(branch: &RemoteBranch) -> Row<'_> {
         Style::default().fg(Color::DarkGray)
     };
 
+    // 最后提交时间列
+    let time_text = branch.last_commit_time.clone();
+    let time_style = Style::default().fg(Color::Rgb(200, 200, 200));
+
+    // 作者列
+    let author_text = branch.last_commit_author.clone();
+    let author_style = Style::default().fg(Color::Rgb(180, 180, 255));
+
+    // 提交消息列
+    let message_text = branch.last_commit_message.clone();
+    let message_style = Style::default().fg(Color::White);
+
     Row::new(vec![
         Cell::from(select_text).style(select_style),
         Cell::from(status_text).style(status_style),
         Cell::from(remote_text).style(remote_style),
         Cell::from(local_text).style(local_style),
+        Cell::from(time_text).style(time_style),
+        Cell::from(author_text).style(author_style),
+        Cell::from(message_text).style(message_style),
     ])
 }
 
@@ -539,4 +565,52 @@ fn draw_branch_detail(f: &mut Frame, app: &App) {
         .alignment(Alignment::Left);
 
     f.render_widget(detail_dialog, popup_area);
+}
+
+/// 绘制 loading 提示（简单紧凑文字版）
+fn draw_loading(f: &mut Frame, app: &App) {
+    let area = f.area();
+
+    // 计算垂直居中的弹窗位置
+    let popup_width = 40;
+    let popup_height = 5;
+    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+    let popup_area = ratatui::layout::Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width.min(area.width),
+        height: popup_height.min(area.height),
+    };
+
+    let loading_lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                &app.loading_message,
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "请稍候...",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(""),
+    ];
+
+    let loading_widget = Paragraph::new(loading_lines)
+        .block(
+            Block::default()
+                .title(" 加载中 ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::DarkGray)),
+        )
+        .style(Style::default().fg(Color::White))
+        .alignment(Alignment::Center);
+
+    f.render_widget(loading_widget, popup_area);
 }

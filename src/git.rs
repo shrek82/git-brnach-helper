@@ -231,3 +231,67 @@ pub fn get_recent_commits(branch_name: &str) -> Result<Vec<String>> {
         anyhow::bail!("获取提交记录失败：{}", stderr.trim())
     }
 }
+
+/// 获取分支的最后提交信息（时间、作者、消息）
+/// branch_name: 分支名称，如 "feature/login"
+pub fn get_last_commit_info(branch_name: &str) -> Result<(String, String, String)> {
+    let output = Command::new("git")
+        .args([
+            "log",
+            branch_name,
+            "--format=%ar||%an||%s",
+            "-n",
+            "1",
+        ])
+        .output()
+        .context("执行 git log 命令失败")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = stdout.split("||").collect();
+        if parts.len() >= 3 {
+            Ok((
+                parts[0].to_string(),  // 相对时间，如 "2 days ago"
+                parts[1].to_string(),  // 作者名
+                parts[2].to_string(),  // 提交消息
+            ))
+        } else {
+            Ok((String::from("未知"), String::from("未知"), String::from("未知")))
+        }
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("获取提交信息失败：{}", stderr.trim())
+    }
+}
+
+/// 获取远程分支的最后提交信息（时间、作者、消息）
+/// remote_ref: 远程分支引用，如 "origin/feature/login"
+pub fn get_remote_last_commit_info(remote_ref: &str) -> Result<(String, String, String)> {
+    let output = Command::new("git")
+        .args([
+            "log",
+            remote_ref,
+            "--format=%ar||%an||%s",
+            "-n",
+            "1",
+        ])
+        .output()
+        .context("执行 git log 命令失败")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = stdout.split("||").collect();
+        if parts.len() >= 3 {
+            Ok((
+                parts[0].to_string(),  // 相对时间，如 "2 days ago"
+                parts[1].to_string(),  // 作者名
+                parts[2].to_string(),  // 提交消息
+            ))
+        } else {
+            Ok((String::from("未知"), String::from("未知"), String::from("未知")))
+        }
+    } else {
+        // 远程分支不存在或已删除，返回默认值
+        Ok((String::from("-"), String::from("-"), String::from("-")))
+    }
+}
