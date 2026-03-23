@@ -4,7 +4,7 @@ mod ui;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -56,37 +56,110 @@ fn run_app<B: ratatui::prelude::Backend>(
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char(' ') => {
-                        // 勾选/取消勾选当前分支
-                        app.toggle_selection();
-                    }
-                    KeyCode::Char('a') => {
-                        // 全选/取消全选
-                        app.toggle_select_all();
-                    }
-                    KeyCode::Char('R') | KeyCode::Char('r') => {
-                        // 刷新分支列表（带 fetch）
-                        git::fetch_remote_async(&app.remote_name);
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        app.refresh_branches()?;
-                    }
-                    KeyCode::Enter => {
-                        // 创建选中的分支
-                        app.create_selected_branches()?;
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
+        match event::read()? {
+            // 处理鼠标事件
+            Event::Mouse(mouse_event) => {
+                match mouse_event.kind {
+                    MouseEventKind::ScrollUp => {
                         app.select_previous();
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    MouseEventKind::ScrollDown => {
                         app.select_next();
+                    }
+                    MouseEventKind::Down(_) => {
+                        // 点击勾选当前分支
+                        app.toggle_selection();
                     }
                     _ => {}
                 }
             }
+            // 处理键盘事件
+            Event::Key(key) => {
+                if key.kind == KeyEventKind::Press {
+                    // 如果显示删除确认对话框，优先处理
+                    if app.show_delete_confirm {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                app.confirm_delete(true, false);
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                app.confirm_delete(false, false);
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // 如果显示分支详情弹窗，按任意键关闭
+                    if app.show_branch_detail {
+                        app.close_branch_detail();
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('?') => {
+                            // 显示/隐藏帮助 overlay
+                            app.toggle_help_overlay();
+                        }
+                        KeyCode::Char(' ') => {
+                            // 勾选/取消勾选当前分支
+                            app.toggle_selection();
+                        }
+                        KeyCode::Char('a') => {
+                            // 全选/取消全选
+                            app.toggle_select_all();
+                        }
+                        KeyCode::Char('R') | KeyCode::Char('r') => {
+                            // 刷新分支列表（带 fetch）
+                            git::fetch_remote_async(&app.remote_name);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            app.refresh_branches()?;
+                        }
+                        KeyCode::Enter => {
+                            // 显示分支详情弹窗
+                            app.show_branch_detail_popup();
+                        }
+                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                            // 同步选中的分支
+                            app.sync_selected_branches()?;
+                        }
+                        KeyCode::Char('b') => {
+                            // 批量创建选中的远程分支到本地
+                            app.execute_selected_branches()?;
+                        }
+                        KeyCode::Char('c') => {
+                            // 切换到当前选中的分支
+                            app.checkout_current_selection()?;
+                        }
+                        KeyCode::Char('d') => {
+                            // 删除选中的分支（显示确认对话框）
+                            app.request_delete(false);
+                        }
+                        KeyCode::Char('D') => {
+                            // 强制删除选中的分支（显示确认对话框）
+                            app.request_delete(true);
+                        }
+                        KeyCode::Char('/') => {
+                            // 进入过滤模式（简单实现：直接设置过滤）
+                            app.set_filter("");
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.select_previous();
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.select_next();
+                        }
+                        _ => {
+                            // 如果帮助 overlay 显示中，按任意键关闭
+                            if app.show_help_overlay {
+                                app.toggle_help_overlay();
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }

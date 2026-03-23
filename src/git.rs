@@ -44,29 +44,6 @@ pub fn fetch_remote_async(remote_name: &str) {
     });
 }
 
-/// 获取所有本地分支的短名称
-pub fn list_local_branches() -> Result<Vec<String>> {
-    let mut branches = Vec::new();
-
-    let output = Command::new("git")
-        .args(["branch", "--format", "%(refname:short)"])
-        .output()
-        .context("执行 git 命令失败")?;
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let line = line.trim().trim_start_matches('*').trim();
-            branches.push(line.to_string());
-        }
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git branch 失败：{}", stderr);
-    }
-
-    Ok(branches)
-}
-
 /// 基于远程分支创建本地分支
 /// remote_ref: 远程分支引用，如 "origin/feature/login"
 /// branch_name: 新本地分支名称，如 "feature/login"
@@ -94,5 +71,163 @@ pub fn create_local_branch(remote_ref: &str, branch_name: &str) -> Result<()> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("创建分支失败：{}", stderr.trim())
+    }
+}
+
+/// 获取所有本地分支的短名称
+pub fn list_local_branches() -> Result<Vec<String>> {
+    let mut branches = Vec::new();
+
+    let output = Command::new("git")
+        .args(["branch", "--format", "%(refname:short)"])
+        .output()
+        .context("执行 git 命令失败")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let line = line.trim().trim_start_matches('*').trim();
+            branches.push(line.to_string());
+        }
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git branch 失败：{}", stderr);
+    }
+
+    Ok(branches)
+}
+
+/// 同步已存在的本地分支到远程（git pull）
+/// branch_name: 本地分支名称，如 "feature/login"
+pub fn sync_local_branch(branch_name: &str) -> Result<()> {
+    // 先切换到目标分支
+    let checkout_output = Command::new("git")
+        .args(["checkout", branch_name])
+        .output()
+        .context("执行 git checkout 命令失败")?;
+
+    if !checkout_output.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        anyhow::bail!("切换到分支 '{}' 失败：{}", branch_name, stderr.trim());
+    }
+
+    // 执行 git pull 同步
+    let pull_output = Command::new("git")
+        .args(["pull"])
+        .output()
+        .context("执行 git pull 命令失败")?;
+
+    if pull_output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&pull_output.stderr);
+        anyhow::bail!("同步分支 '{}' 失败：{}", branch_name, stderr.trim())
+    }
+}
+
+/// 删除本地分支
+/// branch_name: 要删除的分支名称，如 "feature/login"
+/// force: 是否强制删除（即使未合并）
+pub fn delete_local_branch(branch_name: &str, force: bool) -> Result<()> {
+    // 获取当前分支
+    let current_branch_output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .context("执行 git rev-parse 命令失败")?;
+
+    if !current_branch_output.status.success() {
+        let stderr = String::from_utf8_lossy(&current_branch_output.stderr);
+        anyhow::bail!("获取当前分支失败：{}", stderr.trim());
+    }
+
+    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
+
+    // 不能删除当前分支
+    if current_branch == branch_name {
+        anyhow::bail!("不能删除当前所在的分支 '{}'", branch_name);
+    }
+
+    // 执行删除
+    let delete_flag = if force { "-D" } else { "-d" };
+    let output = Command::new("git")
+        .args(["branch", delete_flag, branch_name])
+        .output()
+        .context("执行 git branch 命令失败")?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("删除分支 '{}' 失败：{}", branch_name, stderr.trim())
+    }
+}
+
+/// 切换到指定分支
+/// branch_name: 要切换到的分支名称，如 "feature/login"
+pub fn checkout_branch(branch_name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .args(["checkout", branch_name])
+        .output()
+        .context("执行 git checkout 命令失败")?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("切换到分支 '{}' 失败：{}", branch_name, stderr.trim())
+    }
+}
+
+/// 获取分支与远程的分歧状态（ahead/behind）
+/// branch_name: 本地分支名称，如 "feature/login"
+/// 返回 (ahead_count, behind_count) 表示领先和落后的提交数
+pub fn get_branch_ahead_behind(branch_name: &str) -> Result<(usize, usize)> {
+    // 获取对应的远程分支引用
+    let remote_ref = format!("origin/{}", branch_name);
+
+    // 使用 git rev-list 计算分歧
+    let ahead_output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{}..{}", remote_ref, branch_name)])
+        .output()
+        .context("执行 git rev-list 命令失败")?;
+
+    let behind_output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{}..{}", branch_name, remote_ref)])
+        .output()
+        .context("执行 git rev-list 命令失败")?;
+
+    if ahead_output.status.success() && behind_output.status.success() {
+        let ahead = String::from_utf8_lossy(&ahead_output.stdout).trim().parse().unwrap_or(0);
+        let behind = String::from_utf8_lossy(&behind_output.stdout).trim().parse().unwrap_or(0);
+        Ok((ahead, behind))
+    } else {
+        // 如果远程分支不存在，返回 (0, 0)
+        Ok((0, 0))
+    }
+}
+
+/// 获取分支的最近提交记录
+/// branch_name: 分支名称，如 "feature/login"
+/// 返回提交记录列表（最多 5 条）
+pub fn get_recent_commits(branch_name: &str) -> Result<Vec<String>> {
+    let output = Command::new("git")
+        .args([
+            "log",
+            branch_name,
+            "--format=%h %ad %s",
+            "--date=short",
+            "-n",
+            "5",
+        ])
+        .output()
+        .context("执行 git log 命令失败")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let commits: Vec<String> = stdout.lines().map(|l| l.to_string()).collect();
+        Ok(commits)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("获取提交记录失败：{}", stderr.trim())
     }
 }
