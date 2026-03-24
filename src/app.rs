@@ -720,6 +720,8 @@ impl App {
         let remote_name = self.remote_name.clone();
         let (tx, rx) = mpsc::channel();
         let (debug_tx, debug_rx) = mpsc::channel::<String>();
+
+        // 丢弃之前的接收器（让之前的后台线程自然结束）
         self.load_receiver = Some(rx);
         self.debug_log_receiver = Some(debug_rx);
 
