@@ -224,6 +224,11 @@ pub fn delete_remote_branch(branch_name: &str, remote_name: &str) -> Result<()> 
 /// 切换到指定分支
 /// branch_name: 要切换到的分支名称，如 "feature/login"
 pub fn checkout_branch(branch_name: &str) -> Result<()> {
+    // 检查未提交修改
+    if has_uncommitted_changes()? {
+        anyhow::bail!("当前工作树有未提交的修改，请先提交或暂存后再切换分支");
+    }
+
     let output = Command::new("git")
         .args(["checkout", branch_name])
         .output()

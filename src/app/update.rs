@@ -477,13 +477,7 @@ fn checkout_current_branch(state: &AppState) -> Command<Message> {
     }
 
     Command::perform(
-        move || {
-            // 检查未提交修改
-            if crate::git::has_uncommitted_changes_inner()? {
-                return Err(anyhow::anyhow!("当前工作树有未提交的修改，无法切换分支"));
-            }
-            crate::git::checkout_branch_inner(&branch_name_for_closure)
-        },
+        move || crate::git::checkout_branch_inner(&branch_name_for_closure),
         move |result| {
             let (success, message) = match result {
                 Ok(_) => (true, format!("已切换到分支：{}", branch_name)),
