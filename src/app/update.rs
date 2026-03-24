@@ -382,33 +382,62 @@ fn sync_selected_branches(state: &AppState) -> Command<Message> {
         .map(|b| b.short_name.clone())
         .collect();
 
-    if to_sync.is_empty() {
+    let to_create_and_sync: Vec<(String, String)> = state
+        .branches
+        .items
+        .iter()
+        .filter(|b| b.selected && !b.has_local)
+        .map(|b| (b.remote_ref.clone(), b.short_name.clone()))
+        .collect();
+
+    if to_sync.is_empty() && to_create_and_sync.is_empty() {
         return Command::none();
     }
 
-    Command::batch(
-        to_sync
-            .into_iter()
-            .map(|branch_name| {
-                let name = branch_name.clone();
-                let name_for_result = name.clone();
-                Command::perform(
-                    move || crate::git::sync_local_branch_inner(&name),
-                    move |result| {
-                        let (success, message) = match result {
-                            Ok(_) => (true, format!("同步分支成功：{}", name_for_result)),
-                            Err(e) => (false, format!("同步分支失败：{}: {}", name_for_result, e)),
-                        };
-                        Message::BranchSynced {
-                            branch_name: name_for_result,
-                            success,
-                            message,
-                        }
-                    },
-                )
-            })
-            .collect(),
-    )
+    let mut all_commands = Vec::new();
+
+    // 同步已有本地分支的命令
+    for branch_name in to_sync {
+        let name = branch_name.clone();
+        let name_for_result = name.clone();
+        all_commands.push(Command::perform(
+            move || crate::git::sync_local_branch_inner(&name),
+            move |result| {
+                let (success, message) = match result {
+                    Ok(_) => (true, format!("同步分支成功：{}", name_for_result)),
+                    Err(e) => (false, format!("同步分支失败：{}: {}", name_for_result, e)),
+                };
+                Message::BranchSynced {
+                    branch_name: name_for_result,
+                    success,
+                    message,
+                }
+            },
+        ));
+    }
+
+    // 创建新分支的命令
+    for (remote_ref, branch_name) in to_create_and_sync {
+        let name = branch_name.clone();
+        let ref_name = remote_ref.clone();
+        let name_for_result = name.clone();
+        all_commands.push(Command::perform(
+            move || crate::git::create_local_branch_inner(&ref_name, &name),
+            move |result| {
+                let (success, message) = match result {
+                    Ok(_) => (true, format!("创建分支成功：{}", name_for_result)),
+                    Err(e) => (false, format!("创建分支失败：{}: {}", name_for_result, e)),
+                };
+                Message::BranchCreated {
+                    branch_name: name_for_result,
+                    success,
+                    message,
+                }
+            },
+        ));
+    }
+
+    Command::batch(all_commands)
 }
 
 fn create_selected_branches(state: &AppState) -> Command<Message> {

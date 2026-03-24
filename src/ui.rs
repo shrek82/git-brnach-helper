@@ -281,7 +281,7 @@ fn draw_help(f: &mut Frame, area: ratatui::layout::Rect) {
         Span::styled(" Enter ", Style::default().fg(Color::Green)),
         Span::raw("详情  "),
         Span::styled(" s ", Style::default().fg(Color::Cyan)),
-        Span::raw("同步  "),
+        Span::raw("同步/创建  "),
         Span::styled(" b ", Style::default().fg(Color::Green)),
         Span::raw("创建  "),
         Span::styled(" c ", Style::default().fg(Color::Cyan)),
