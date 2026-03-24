@@ -110,6 +110,10 @@ fn run_app<B: ratatui::prelude::Backend>(
                             // 全选/取消全选
                             app.toggle_select_all();
                         }
+                        KeyCode::Char('l') => {
+                            // 获取本地分支（不 fetch 远程）
+                            app.start_loading_branches(false);
+                        }
                         KeyCode::Char('R') | KeyCode::Char('r') => {
                             // 刷新分支列表：先 fetch 远程，再重新加载
                             app.start_loading_branches(true);

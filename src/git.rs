@@ -20,10 +20,20 @@ pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
             if line.contains("->") {
                 continue;
             }
+            // 处理两种格式：
+            // 1. "origin/xxx" - 标准格式
+            // 2. "remotes/origin/xxx" - 完整格式
+            let branch_ref = if line.starts_with("remotes/") {
+                // 移除 "remotes/" 前缀
+                line.strip_prefix("remotes/").unwrap_or(line)
+            } else {
+                line
+            };
+
             // 精确匹配：必须是 "origin/xxx" 格式，且 remote_name 后面要有 /
             let prefix = format!("{}/", remote_name);
-            if line.starts_with(&prefix) && line.len() > prefix.len() {
-                branches.push(line.to_string());
+            if branch_ref.starts_with(&prefix) && branch_ref.len() > prefix.len() {
+                branches.push(branch_ref.to_string());
             }
         }
     } else {
@@ -283,5 +293,22 @@ pub fn get_remote_last_commit_info(remote_ref: &str) -> Result<(String, String, 
     } else {
         // 远程分支不存在或已删除，返回默认值
         Ok((String::from("-"), String::from("-"), String::from("-")))
+    }
+}
+
+/// 获取当前所在的分支名称
+/// 返回当前分支的短名称，如 "feature/login"
+pub fn get_current_branch() -> Result<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .context("执行 git rev-parse 命令失败")?;
+
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(branch)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("获取当前分支失败：{}", stderr.trim())
     }
 }

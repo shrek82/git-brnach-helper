@@ -75,8 +75,12 @@ pub struct App {
     pub loading_message: String,
     /// 后台加载任务的接收器
     pub load_receiver: Option<mpsc::Receiver<Result<Vec<RemoteBranch>>>>,
+    /// 后台 ahead/behind 和提交信息更新任务的接收器
+    pub load_ahead_behind_receiver: Option<mpsc::Receiver<Vec<RemoteBranch>>>,
     /// 是否已从远程加载（false=使用本地缓存，true=已 fetch 远程）
     pub fetched_from_remote: bool,
+    /// 当前所在的分支名称
+    pub current_branch: String,
 }
 
 impl App {
@@ -109,7 +113,9 @@ impl App {
             is_loading: false,
             loading_message: String::new(),
             load_receiver: None,
+            load_ahead_behind_receiver: None,
             fetched_from_remote: false,
+            current_branch: String::from("unknown"),
         }
     }
 
@@ -645,11 +651,7 @@ impl App {
     /// `fetch_remote` 控制是否先 fetch 远程（true=先请求远程，false=使用本地缓存）
     pub fn start_loading_branches(&mut self, fetch_remote: bool) {
         self.is_loading = true;
-        self.loading_message = if fetch_remote {
-            String::from("正在同步远程仓库...")
-        } else {
-            String::from("正在加载分支列表...")
-        };
+        self.loading_message = String::from("正在加载分支列表...");
         self.remote_branches.clear();
         self.all_branches.clear();
 
@@ -657,60 +659,62 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.load_receiver = Some(rx);
 
-        std::thread::spawn(move || {
-            // 如果请求远程，先执行 fetch 更新远程引用
-            if fetch_remote {
+        // 如果需要 fetch，在后台异步执行，不阻塞 UI
+        if fetch_remote {
+            let fetch_remote_name = remote_name.clone();
+            std::thread::spawn(move || {
+                // 后台 fetch，不影响 UI 显示
                 let _ = std::process::Command::new("git")
-                    .args(["fetch", &remote_name, "--prune", "--quiet"])
+                    .args(["fetch", &fetch_remote_name, "--quiet"])
                     .output();
-            }
+                // fetch 完成后不通知 UI，用户下次刷新时自然能看到更新
+            });
+        }
 
-            // 获取远程分支引用（从本地缓存读取）
-            match git::list_remote_branches(&remote_name) {
-                Ok(remote_refs) => {
-                    let total = remote_refs.len();
-
-                    // 获取本地分支
-                    let local_branches = match git::list_local_branches() {
-                        Ok(branches) => branches,
-                        Err(e) => return tx.send(Err(anyhow::anyhow!("获取本地分支失败：{}", e))),
-                    };
-
-                    // 使用 HashSet 加速查找
-                    use std::collections::HashSet;
-                    let local_set: HashSet<&String> = local_branches.iter().collect();
-
-                    // 构建分支列表（不获取提交信息，快速返回）
-                    let mut branches = Vec::with_capacity(total);
-                    for remote_ref in remote_refs {
-                        let short_name = remote_ref
-                            .strip_prefix(&format!("{}/", remote_name))
-                            .unwrap_or(&remote_ref)
-                            .to_string();
-
-                        let has_local = local_set.contains(&short_name);
-                        let local_name = if has_local { Some(short_name.clone()) } else { None };
-
-                        branches.push(RemoteBranch {
-                            remote_ref,
-                            short_name,
-                            has_local,
-                            local_name,
-                            selected: false,
-                            ahead: 0,
-                            behind: 0,
-                            last_commit_time: String::from("-"),
-                            last_commit_author: String::from("-"),
-                            last_commit_message: String::from("-"),
-                        });
-                    }
-
-                    // 排序
-                    branches.sort_by(|a, b| a.short_name.to_lowercase().cmp(&b.short_name.to_lowercase()));
-                    let _ = tx.send(Ok(branches));
-                }
+        std::thread::spawn(move || {
+            // 不管是否 fetch，先快速读取本地缓存的分支列表
+            let remote_refs = match git::list_remote_branches(&remote_name) {
+                Ok(refs) => refs,
                 Err(e) => return tx.send(Err(anyhow::anyhow!("获取远程分支失败：{}", e))),
+            };
+
+            let local_branches = match git::list_local_branches() {
+                Ok(branches) => branches,
+                Err(e) => return tx.send(Err(anyhow::anyhow!("获取本地分支失败：{}", e))),
+            };
+
+            use std::collections::HashSet;
+            let local_set: HashSet<&String> = local_branches.iter().collect();
+
+            let mut branches = Vec::with_capacity(remote_refs.len());
+            for remote_ref in remote_refs {
+                let short_name = remote_ref
+                    .strip_prefix(&format!("{}/", remote_name))
+                    .unwrap_or(&remote_ref)
+                    .to_string();
+
+                let has_local = local_set.contains(&short_name);
+                let local_name = if has_local { Some(short_name.clone()) } else { None };
+
+                branches.push(RemoteBranch {
+                    remote_ref,
+                    short_name,
+                    has_local,
+                    local_name,
+                    selected: false,
+                    ahead: 0,
+                    behind: 0,
+                    last_commit_time: String::from("-"),
+                    last_commit_author: String::from("-"),
+                    last_commit_message: String::from("-"),
+                });
             }
+
+            branches.sort_by(|a, b| a.short_name.to_lowercase().cmp(&b.short_name.to_lowercase()));
+
+            // 先发送分支列表给用户显示
+            let _ = tx.send(Ok(branches));
+
             Ok(())
         });
     }
@@ -718,6 +722,9 @@ impl App {
     /// 初始化加载：直接从本地缓存读取，不显示 loading
     pub fn init_branches_from_cache(&mut self) {
         let remote_name = self.remote_name.clone();
+
+        // 获取当前分支
+        self.current_branch = git::get_current_branch().unwrap_or_else(|_| String::from("unknown"));
 
         // 同步加载（不显示 loading）
         match git::list_remote_branches(&remote_name) {
@@ -774,47 +781,68 @@ impl App {
 
     /// 检查异步加载是否完成
     pub fn poll_loading_complete(&mut self) -> Result<bool> {
-        if !self.is_loading {
-            return Ok(false);
-        }
+        let mut changed = false;
 
-        if let Some(rx) = self.load_receiver.take() {
-            match rx.try_recv() {
-                Ok(Ok(branches)) => {
-                    self.all_branches = branches;
-                    self.apply_filter();
-                    self.is_loading = false;
-                    self.loading_message.clear();
-                    self.fetched_from_remote = true;
-                    self.load_ahead_behind_for_visible();
-                    self.status_message = format!("已加载 {} 个分支（已同步远程）", self.remote_branches.len());
-                    Ok(true)
-                }
-                Ok(Err(e)) => {
-                    self.is_loading = false;
-                    self.loading_message.clear();
-                    self.status_message = format!("加载失败：{}", e);
-                    Ok(true)
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    self.load_receiver = Some(rx);
-                    Ok(false)
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.is_loading = false;
-                    self.status_message = String::from("加载线程已断开");
-                    Ok(true)
+        // 检查主加载任务
+        if self.is_loading {
+            if let Some(rx) = self.load_receiver.take() {
+                match rx.try_recv() {
+                    Ok(Ok(branches)) => {
+                        self.all_branches = branches;
+                        self.apply_filter();
+                        self.is_loading = false;
+                        self.loading_message.clear();
+                        self.fetched_from_remote = true;
+                        self.load_ahead_behind_for_visible();
+                        self.status_message = format!("已加载 {} 个分支（已同步远程）", self.remote_branches.len());
+                        changed = true;
+                    }
+                    Ok(Err(e)) => {
+                        self.is_loading = false;
+                        self.loading_message.clear();
+                        self.status_message = format!("加载失败：{}", e);
+                        changed = true;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        self.load_receiver = Some(rx);
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.is_loading = false;
+                        self.status_message = String::from("加载线程已断开");
+                        changed = true;
+                    }
                 }
             }
-        } else {
-            Ok(false)
         }
+
+        // 检查 ahead/behind 和提交信息更新
+        if let Some(rx) = self.load_ahead_behind_receiver.take() {
+            match rx.try_recv() {
+                Ok(branches) => {
+                    // 更新分支数据
+                    self.all_branches = branches.clone();
+                    self.apply_filter();
+                    // 保持接收器以便后续更新（如果需要）
+                    // self.load_ahead_behind_receiver = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.load_ahead_behind_receiver = Some(rx);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // 线程结束，不再接收
+                }
+            }
+        }
+
+        Ok(changed)
     }
 
     /// 懒加载：只为可见区域的分支计算 ahead/behind 和提交信息
     fn load_ahead_behind_for_visible(&mut self) {
         // 全部移到后台线程执行，避免阻塞 UI
         let mut branches = std::mem::take(&mut self.all_branches);
+
+        let (tx, rx) = mpsc::channel::<Vec<RemoteBranch>>();
 
         std::thread::spawn(move || {
             // 优先级 1: 先加载前 30 个分支的 ahead/behind（可见区域）
@@ -866,6 +894,12 @@ impl App {
                 branches[i].last_commit_author = commit_info.1;
                 branches[i].last_commit_message = commit_info.2;
             }
+
+            // 发送回主线程
+            let _ = tx.send(branches);
         });
+
+        // 后台接收更新（非阻塞）
+        self.load_ahead_behind_receiver = Some(rx);
     }
 }

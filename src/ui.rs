@@ -22,7 +22,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    draw_title(f, chunks[0]);
+    draw_title(f, chunks[0], app);
     draw_branch_table(f, app, chunks[1]);
     draw_operation_log(f, app, chunks[2]);
     draw_help(f, chunks[3]);
@@ -54,8 +54,9 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 /// 绘制标题栏
-fn draw_title(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = Paragraph::new("Git 分支管理工具")
+fn draw_title(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let title_text = format!("Git 分支管理工具 (当前分支：{})", app.current_branch);
+    let title = Paragraph::new(title_text)
         .style(
             Style::default()
                 .fg(Color::Cyan)
@@ -285,10 +286,12 @@ fn draw_help(f: &mut Frame, area: ratatui::layout::Rect) {
         Span::raw("删除  "),
         Span::styled(" / ", Style::default().fg(Color::Yellow)),
         Span::raw("过滤  "),
+        Span::styled(" l ", Style::default().fg(Color::Yellow)),
+        Span::raw("本地  "),
+        Span::styled(" r ", Style::default().fg(Color::Yellow)),
+        Span::raw("远程  "),
         Span::styled(" ? ", Style::default().fg(Color::Magenta)),
         Span::raw("帮助  "),
-        Span::styled(" r ", Style::default().fg(Color::Yellow)),
-        Span::raw("刷新  "),
         Span::styled(" q ", Style::default().fg(Color::Red)),
         Span::raw("退出"),
     ]);
@@ -360,8 +363,12 @@ fn draw_help_overlay(f: &mut Frame) {
             Span::raw("强制删除选中的分支"),
         ]),
         Line::from(vec![
+            Span::styled("  l        ", Style::default().fg(Color::Yellow)),
+            Span::raw("获取本地分支"),
+        ]),
+        Line::from(vec![
             Span::styled("  r        ", Style::default().fg(Color::Yellow)),
-            Span::raw("刷新分支列表"),
+            Span::raw("获取远程分支"),
         ]),
         Line::from(vec![
             Span::styled("  /        ", Style::default().fg(Color::Yellow)),
