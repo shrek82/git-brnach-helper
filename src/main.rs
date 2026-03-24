@@ -3,17 +3,30 @@ mod git;
 mod ui;
 
 use anyhow::Result;
+use chrono::Local;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Write;
 
 use app::App;
 
 fn main() -> Result<()> {
+    // 清空之前的 debug.log 文件
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .open("debug.log")
+    {
+        let start_msg = format!("[{}] === 程序启动 ===\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let _ = file.write_all(start_msg.as_bytes());
+    }
+
     // 设置终端
     enable_raw_mode()?;
     let mut stdout = io::stdout();

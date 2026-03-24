@@ -1,7 +1,24 @@
 use crate::git;
 use anyhow::Result;
 use chrono::Local;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::mpsc;
+
+/// 写入 DEBUG 日志到文件（可在线程中调用）
+fn write_debug_log(message: &str) {
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let log_line = format!("[{}] {}\n", timestamp, message);
+
+    // 追加模式打开文件
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("debug.log")
+    {
+        let _ = file.write_all(log_line.as_bytes());
+    }
+}
 
 /// 表示一个远程分支及其对应的本地分支状态
 #[derive(Clone, Debug)]
@@ -321,6 +338,16 @@ impl App {
         if self.operation_log.len() > 10 {
             self.operation_log.truncate(10);
         }
+
+        // 同时将 DEBUG 日志写入文件
+        if message.starts_with("[DEBUG]") {
+            self.write_debug_log(message);
+        }
+    }
+
+    /// 将 DEBUG 日志写入到项目目录的 debug.log 文件
+    fn write_debug_log(&self, message: &str) {
+        write_debug_log(message);
     }
 
     /// 刷新分支列表（保留用于兼容）
@@ -696,9 +723,9 @@ impl App {
         self.load_receiver = Some(rx);
         self.debug_log_receiver = Some(debug_rx);
 
-        // 记录开始加载的日志
+        // 记录开始加载的日志（立即添加到操作日志）
         let mode_str = if fetch_remote { "远程" } else { "本地" };
-        self.add_log(&format!("[DEBUG] 开始加载{}分支列表...", mode_str));
+        self.add_log(&format!("[DEBUG] [主线程] 开始加载{}分支列表...", mode_str));
 
         // 如果需要 fetch，在后台异步执行，不阻塞 UI
         if fetch_remote {
@@ -715,30 +742,48 @@ impl App {
             });
         }
 
+        let thread_spawn_start = Instant::now();
+        self.add_log(&format!("[DEBUG] [主线程] 即将启动后台加载线程..."));
+
         std::thread::spawn(move || {
+            let thread_start = Instant::now();
+            // 线程启动后立即记录（直接写入文件）
+            let thread_elapsed = thread_start.elapsed();
+            let debug_msg = format!("[DEBUG] [后台线程] 线程已启动，耗时：{:.2?}ms，即将执行 git 命令...", thread_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
+
             // 记录：开始获取远程分支
             let remote_start = Instant::now();
             let remote_refs = match git::list_remote_branches(&remote_name) {
                 Ok(refs) => refs,
                 Err(e) => {
-                    let _ = debug_tx.send(format!("[DEBUG] 获取远程分支失败：{}", e));
+                    let err_msg = format!("[DEBUG] 获取远程分支失败：{}", e);
+                    write_debug_log(&err_msg);
+                    let _ = debug_tx.send(err_msg);
                     return tx.send(Err(anyhow::anyhow!("获取远程分支失败：{}", e)));
                 }
             };
             let remote_elapsed = remote_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] git branch -r 获取远程分支 ({} 个) 耗时：{:.2?}ms", remote_refs.len(), remote_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] git branch -r 获取远程分支 ({} 个) 耗时：{:.2?}ms", remote_refs.len(), remote_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             // 记录：开始获取本地分支
             let local_start = Instant::now();
             let local_branches = match git::list_local_branches() {
                 Ok(branches) => branches,
                 Err(e) => {
-                    let _ = debug_tx.send(format!("[DEBUG] 获取本地分支失败：{}", e));
+                    let err_msg = format!("[DEBUG] 获取本地分支失败：{}", e);
+                    write_debug_log(&err_msg);
+                    let _ = debug_tx.send(err_msg);
                     return tx.send(Err(anyhow::anyhow!("获取本地分支失败：{}", e)));
                 }
             };
             let local_elapsed = local_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] git branch -l 获取本地分支 ({} 个) 耗时：{:.2?}ms", local_branches.len(), local_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] git branch -l 获取本地分支 ({} 个) 耗时：{:.2?}ms", local_branches.len(), local_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             use std::collections::HashSet;
             let local_set: HashSet<&String> = local_branches.iter().collect();
@@ -777,6 +822,9 @@ impl App {
 
             Ok(())
         });
+
+        let thread_spawn_elapsed = thread_spawn_start.elapsed();
+        self.add_log(&format!("[DEBUG] [主线程] 后台线程已启动，耗时：{:.2?}ms", thread_spawn_elapsed.as_secs_f64() * 1000.0));
     }
 
     /// 初始化加载：直接从本地缓存读取，不显示 loading
@@ -948,7 +996,9 @@ impl App {
                 }
             }
             let ahead_elapsed = ahead_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] 加载 {} 个分支 ahead/behind 耗时：{:.2?}ms", visible_count, ahead_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] 加载 {} 个分支 ahead/behind 耗时：{:.2?}ms", visible_count, ahead_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             // 优先级 2: 加载前 50 个分支的提交信息
             let batch_size = std::cmp::min(50, branches.len());
@@ -966,7 +1016,9 @@ impl App {
                 branches[i].last_commit_message = commit_info.2;
             }
             let commit_elapsed = commit_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] 加载 {} 个分支提交信息耗时：{:.2?}ms", batch_size, commit_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] 加载 {} 个分支提交信息耗时：{:.2?}ms", batch_size, commit_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             // 优先级 3: 加载剩余分支的 ahead/behind
             let remaining_ahead_start = Instant::now();
@@ -979,7 +1031,9 @@ impl App {
                 }
             }
             let remaining_ahead_elapsed = remaining_ahead_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] 加载剩余分支 ahead/behind 耗时：{:.2?}ms", remaining_ahead_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] 加载剩余分支 ahead/behind 耗时：{:.2?}ms", remaining_ahead_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             // 优先级 4: 加载剩余分支的提交信息
             let remaining_commit_start = Instant::now();
@@ -996,10 +1050,14 @@ impl App {
                 branches[i].last_commit_message = commit_info.2;
             }
             let remaining_commit_elapsed = remaining_commit_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] 加载剩余分支提交信息耗时：{:.2?}ms", remaining_commit_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] 加载剩余分支提交信息耗时：{:.2?}ms", remaining_commit_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             let total_elapsed = total_start.elapsed();
-            let _ = debug_tx.send(format!("[DEBUG] 提交信息加载完成，总耗时：{:.2?}ms", total_elapsed.as_secs_f64() * 1000.0));
+            let debug_msg = format!("[DEBUG] 提交信息加载完成，总耗时：{:.2?}ms", total_elapsed.as_secs_f64() * 1000.0);
+            write_debug_log(&debug_msg);
+            let _ = debug_tx.send(debug_msg);
 
             // 发送回主线程
             let _ = tx.send(branches);
