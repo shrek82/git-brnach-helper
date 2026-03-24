@@ -430,7 +430,7 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let confirm_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("删除 ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("删除 ", Style::default().fg(Color::White)),
             Span::styled(format!("{} 个{} ", count, delete_type), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             Span::styled("？", Style::default().fg(Color::White)),
         ]),
@@ -447,8 +447,8 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red))
-                .style(Style::default().bg(Color::Rgb(60, 0, 0))),
+                .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(Color::Rgb(50, 0, 0))),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
