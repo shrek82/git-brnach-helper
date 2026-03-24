@@ -12,9 +12,9 @@ use anyhow::Result;
 use app::{update, AppState, Command};
 use chrono::Local;
 use crossterm::{
-    event::{self, EnableMouseCapture, Event, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
-    terminal::{enable_raw_mode, EnterAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use messages::Message;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -23,6 +23,14 @@ use std::io;
 use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// 恢复终端设置
+fn restore_terminal() -> Result<()> {
+    disable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)?;
+    Ok(())
+}
 
 fn main() -> Result<()> {
     // 清空之前的 debug.log 文件
@@ -61,11 +69,23 @@ fn main() -> Result<()> {
 
     // 主循环
     let mut last_tick = Instant::now();
-    loop {
+    let mut should_quit = false;
+
+    while !should_quit {
         // 处理消息
         while let Ok(msg) = msg_rx.try_recv() {
+            // 检查是否是 Quit 消息
+            if matches!(msg, Message::Quit) {
+                should_quit = true;
+                break;
+            }
+
             let cmd = update(&mut state, msg);
             cmd.execute(msg_tx.clone());
+        }
+
+        if should_quit {
+            break;
         }
 
         // Tick 事件（用于超时、动画）
@@ -88,4 +108,8 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    // 退出前恢复终端
+    restore_terminal()?;
+    Ok(())
 }

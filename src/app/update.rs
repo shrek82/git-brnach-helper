@@ -149,6 +149,12 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             Command::none()
         }
 
+        // === 退出应用 ===
+        Message::Quit => {
+            // 返回一个特殊命令，主循环会处理
+            Command::none()
+        }
+
         // === 其他消息（预留） ===
         Message::FilterChanged(_) => {
             Command::none()
@@ -190,7 +196,7 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
     match key {
         KeyCode::Char('q') => {
             // 退出
-            std::process::exit(0);
+            return Command::perform(|| (), |_| Message::Quit);
         }
 
         KeyCode::Char('l') => {
