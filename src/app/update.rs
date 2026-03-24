@@ -15,11 +15,14 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
 
         // === 分支选择切换 ===
         Message::BranchToggled(filtered_idx) => {
+            eprintln!("BranchToggled: filtered_idx={}, cursor={}", filtered_idx, state.cursor);
             if let Some(original_idx) = state.filtered_index_to_original(filtered_idx) {
+                eprintln!("  original_idx={}", original_idx);
                 if let Some(branch) = state.branches.items.get_mut(original_idx) {
                     branch.selected = !branch.selected;
                     let status = if branch.selected { "已选中" } else { "已取消" };
                     let branch_name = branch.short_name.clone();
+                    eprintln!("  分支 {} 状态：{}", branch_name, status);
                     let _ = branch; // 忽略借用
                     state.add_log(&format!("{}: {}", branch_name, status));
                 }
@@ -499,6 +502,12 @@ fn checkout_current_branch(state: &AppState) -> Command<Message> {
 }
 
 fn request_delete_branches(state: &mut AppState, delete_remote: bool) -> Command<Message> {
+    // 调试信息：输出所有分支的选中状态
+    eprintln!("=== 分支选择状态 ===");
+    for (i, b) in state.branches.items.iter().enumerate() {
+        eprintln!("  [{}] {} - selected={}, has_local={}", i, b.short_name, b.selected, b.has_local);
+    }
+
     let to_delete: Vec<String> = state
         .branches
         .items
@@ -506,6 +515,10 @@ fn request_delete_branches(state: &mut AppState, delete_remote: bool) -> Command
         .filter(|b| b.selected && b.has_local && !state.is_protected_branch(&b.short_name))
         .map(|b| b.short_name.clone())
         .collect();
+
+    eprintln!("受保护分支：{:?}", ["main", "master", "develop", "dev"]);
+    eprintln!("可删除的分支：{:?}", to_delete);
+    eprintln!("==================");
 
     if to_delete.is_empty() {
         state.add_log("没有选中的本地分支可删除");
