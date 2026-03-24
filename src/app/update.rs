@@ -119,11 +119,18 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
         } => {
             if success {
                 state.add_log(&format!("删除分支成功：{}", branch_name));
-                state.branches.update_branch(&branch_name, |branch| {
-                    branch.has_local = false;
-                    branch.local_name = None;
-                    branch.selected = false;
-                });
+                // 如果是删除远程分支，需要刷新列表
+                if message.contains("远程") {
+                    // 从列表中移除已删除的远程分支
+                    state.branches.items.retain(|b| b.short_name != branch_name);
+                } else {
+                    // 只删除本地分支，更新状态
+                    state.branches.update_branch(&branch_name, |branch| {
+                        branch.has_local = false;
+                        branch.local_name = None;
+                        branch.selected = false;
+                    });
+                }
             } else {
                 state.add_log(&message);
             }

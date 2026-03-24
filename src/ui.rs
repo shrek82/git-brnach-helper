@@ -434,7 +434,7 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let confirm_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("⚠️  确认删除 ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("⚠️  确认删除 ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::raw(format!("{} 个{}？", count, delete_type)),
         ]),
         Line::from(""),
@@ -448,10 +448,10 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let confirm_dialog = Paragraph::new(confirm_lines)
         .block(
             Block::default()
-                .title(" 删除确认 ")
+                .title(" ⚠️  删除确认 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red))
-                .style(Style::default().bg(Color::DarkGray)),
+                .style(Style::default().bg(Color::Rgb(80, 0, 0))),  // 深红色背景
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
