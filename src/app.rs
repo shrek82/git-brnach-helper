@@ -1006,8 +1006,8 @@ impl App {
     /// 懒加载：只为可见区域的分支计算 ahead/behind 和提交信息
     fn load_ahead_behind_for_visible(&mut self) {
         use std::time::Instant;
-        // 全部移到后台线程执行，避免阻塞 UI
-        let mut branches = std::mem::take(&mut self.all_branches);
+        // 克隆一份数据到后台线程执行，避免阻塞 UI 并清空数据
+        let mut branches = self.all_branches.clone();
 
         let (tx, rx) = mpsc::channel::<Vec<RemoteBranch>>();
         let (debug_tx, debug_rx) = mpsc::channel::<String>();
