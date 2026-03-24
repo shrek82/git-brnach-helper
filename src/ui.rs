@@ -107,13 +107,13 @@ fn draw_branch_table(f: &mut Frame, state: &AppState, area: ratatui::layout::Rec
     let table = Table::new(
         rows,
         [
-            Constraint::Length(5),   // 选择
-            Constraint::Length(8),   // 状态
-            Constraint::Min(25),     // 远程分支
-            Constraint::Min(25),     // 本地分支
-            Constraint::Length(12),  // 最后提交
-            Constraint::Length(12),  // 作者
-            Constraint::Min(30),     // 提交消息
+            Constraint::Length(4),   // 选择
+            Constraint::Length(6),   // 状态
+            Constraint::Min(15),     // 远程分支
+            Constraint::Min(15),     // 本地分支
+            Constraint::Length(10),  // 最后提交
+            Constraint::Length(10),  // 作者
+            Constraint::Min(40),     // 提交消息
         ],
     )
     .header(
