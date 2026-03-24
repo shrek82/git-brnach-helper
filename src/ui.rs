@@ -110,9 +110,9 @@ fn draw_branch_table(f: &mut Frame, state: &AppState, area: ratatui::layout::Rec
             Constraint::Length(4),   // 选择
             Constraint::Length(6),   // 状态
             Constraint::Min(15),     // 远程分支
-            Constraint::Min(10),     // 本地分支
-            Constraint::Length(12),  // 最后提交
-            Constraint::Length(12),  // 作者
+            Constraint::Min(8),      // 本地分支
+            Constraint::Length(14),  // 最后提交
+            Constraint::Length(14),  // 作者
             Constraint::Min(40),     // 提交消息
         ],
     )
