@@ -1,16 +1,21 @@
+//! UI 渲染模块
+//!
+//! 负责界面渲染，使用声明式方式
+
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Row, Table, TableState, Cell},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState, Cell},
     Frame,
 };
 
-use crate::app::{App, RemoteBranch};
+use crate::app::AppState;
+use crate::domain::RemoteBranch;
 
 /// 绘制主界面
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -22,40 +27,42 @@ pub fn draw(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    draw_title(f, chunks[0], app);
-    draw_branch_table(f, app, chunks[1]);
-    draw_operation_log(f, app, chunks[2]);
+    draw_title(f, chunks[0], state);
+    draw_branch_table(f, state, chunks[1]);
+    draw_operation_log(f, state, chunks[2]);
     draw_help(f, chunks[3]);
 
     // 绘制帮助 overlay
-    if app.show_help_overlay {
+    if let Some(crate::app::ModalState::Help) = &state.modal {
         draw_help_overlay(f);
     }
 
     // 绘制删除确认对话框
-    if app.show_delete_confirm {
-        draw_delete_confirm(f, app);
+    if let Some(crate::app::ModalState::DeleteConfirm { branches, .. }) = &state.modal {
+        draw_delete_confirm(f, branches.len());
     }
 
     // 绘制分支详情弹窗
-    if app.show_branch_detail {
-        draw_branch_detail(f, app);
-    }
-
-    // 绘制进度条
-    if app.is_operating && app.progress_total > 0 {
-        draw_progress(f, app);
+    if let Some(crate::app::ModalState::BranchDetail { branch_name, commits }) = &state.modal {
+        draw_branch_detail(f, branch_name, commits);
     }
 
     // 绘制 loading 提示（加载或同步时显示）
-    if app.is_loading || app.is_operating {
-        draw_loading(f, app);
+    if state.branches.loading_state.is_loading() {
+        draw_loading(f, &state.branches.loading_state);
+    }
+
+    // 绘制 Toast 提示
+    if let Some(toast) = &state.toast {
+        if !toast.is_expired() {
+            draw_toast(f, toast);
+        }
     }
 }
 
 /// 绘制标题栏
-fn draw_title(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let title_text = format!("Git 分支管理工具 (当前分支：{})", app.current_branch);
+fn draw_title(f: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let title_text = format!("Git 分支管理工具 (当前分支：{})", state.current_branch);
     let title = Paragraph::new(title_text)
         .style(
             Style::default()
@@ -72,32 +79,36 @@ fn draw_title(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
 }
 
 /// 绘制分支列表（表格形式）
-fn draw_branch_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn draw_branch_table(f: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+    // 获取过滤后的分支索引
+    let filtered_indices = state.filtered_indices();
     let mut rows = Vec::new();
 
-    for branch in app.remote_branches.iter() {
-        let row = render_branch_row(branch);
-        rows.push(row);
+    for &idx in &filtered_indices {
+        if let Some(branch) = state.branches.items.get(idx) {
+            let row = render_branch_row(branch);
+            rows.push(row);
+        }
     }
 
     let mut table_state = TableState::default();
-    table_state.select(Some(app.cursor));
+    table_state.select(Some(state.cursor));
 
     // 统计信息
-    let total = app.remote_branches.len();
-    let has_local = app.remote_branches.iter().filter(|b| b.has_local).count();
+    let total = state.branches.items.len();
+    let has_local = state.branches.items.iter().filter(|b| b.has_local).count();
     let no_local = total - has_local;
-    let selected = app.remote_branches.iter().filter(|b| b.selected).count();
+    let selected = state.branches.items.iter().filter(|b| b.selected).count();
 
-    let filter_info = if !app.filter_text.is_empty() {
-        format!("过滤：{} | ", app.filter_text)
+    let filter_info = if !state.filter_text.is_empty() {
+        format!("过滤：{} | ", state.filter_text)
     } else {
         String::new()
     };
 
     let title = format!(
         " {}远程：{} | 共 {} 个 | 已有本地：{} | 待创建：{} | 已选中：{}  ",
-        filter_info, app.remote_name, total, has_local, no_local, selected
+        filter_info, state.remote_name, total, has_local, no_local, selected
     );
 
     let table = Table::new(
@@ -227,12 +238,12 @@ fn render_branch_row(branch: &RemoteBranch) -> Row<'_> {
 }
 
 /// 绘制操作日志区域
-fn draw_operation_log(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn draw_operation_log(f: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
     // 构建日志文本
-    let log_lines: Vec<Line> = app
+    let log_lines: Vec<Line> = state
         .operation_log
         .iter()
-        .map(|log| {
+        .map(|log: &String| {
             Line::from(Span::styled(
                 log.clone(),
                 Style::default().fg(Color::White),
@@ -403,7 +414,7 @@ fn draw_help_overlay(f: &mut Frame) {
 }
 
 /// 绘制删除确认对话框
-fn draw_delete_confirm(f: &mut Frame, app: &App) {
+fn draw_delete_confirm(f: &mut Frame, count: usize) {
     let area = f.area();
 
     // 计算居中弹窗大小
@@ -423,7 +434,7 @@ fn draw_delete_confirm(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(vec![
             Span::styled("⚠️  确认删除 ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{} 个分支？", app.pending_delete_count)),
+            Span::raw(format!("{} 个分支？", count)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -447,47 +458,8 @@ fn draw_delete_confirm(f: &mut Frame, app: &App) {
     f.render_widget(confirm_dialog, popup_area);
 }
 
-/// 绘制进度条
-fn draw_progress(f: &mut Frame, app: &App) {
-    let area = f.area();
-
-    // 在底部绘制进度条
-    let progress_height = 3;
-    let progress_area = ratatui::layout::Rect {
-        x: 0,
-        y: area.height.saturating_sub(progress_height),
-        width: area.width,
-        height: progress_height,
-    };
-
-    let progress_ratio = if app.progress_total > 0 {
-        app.progress_current as f64 / app.progress_total as f64
-    } else {
-        0.0
-    };
-
-    let progress_label = format!("{} / {} ({:.0}%)",
-        app.progress_current,
-        app.progress_total,
-        progress_ratio * 100.0
-    );
-
-    let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .percent((progress_ratio * 100.0) as u16)
-        .label(progress_label)
-        .block(
-            Block::default()
-                .title(" 执行中 ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
-
-    f.render_widget(gauge, progress_area);
-}
-
 /// 绘制分支详情弹窗
-fn draw_branch_detail(f: &mut Frame, app: &App) {
+fn draw_branch_detail(f: &mut Frame, branch_name: &str, commits: &[String]) {
     let area = f.area();
 
     // 计算居中弹窗大小
@@ -503,9 +475,6 @@ fn draw_branch_detail(f: &mut Frame, app: &App) {
         height: popup_height.min(area.height),
     };
 
-    // 获取当前分支信息
-    let branch = app.remote_branches.iter().find(|b| b.short_name == app.detail_branch_name);
-
     let mut detail_lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -514,40 +483,20 @@ fn draw_branch_detail(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(vec![
             Span::styled("分支名称：", Style::default().fg(Color::Yellow)),
-            Span::raw(app.detail_branch_name.clone()),
+            Span::raw(branch_name.to_string()),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("最近提交记录：", Style::default().fg(Color::Yellow)),
         ]),
     ];
 
-    if let Some(b) = branch {
-        let status = if b.has_local {
-            format!("已存在本地分支 (ahead: {}, behind: {})", b.ahead, b.behind)
-        } else {
-            String::from("待创建")
-        };
-        detail_lines.push(Line::from(vec![
-            Span::styled("状态：", Style::default().fg(Color::Yellow)),
-            Span::raw(status),
-        ]));
-
-        if b.has_local {
-            detail_lines.push(Line::from(vec![
-                Span::styled("远程引用：", Style::default().fg(Color::Yellow)),
-                Span::raw(b.remote_ref.clone()),
-            ]));
-        }
-    }
-
-    detail_lines.push(Line::from(""));
-    detail_lines.push(Line::from(vec![
-        Span::styled("最近提交记录：", Style::default().fg(Color::Yellow)),
-    ]));
-
-    if app.recent_commits.is_empty() {
+    if commits.is_empty() {
         detail_lines.push(Line::from(vec![
             Span::styled("  暂无提交记录", Style::default().fg(Color::DarkGray)),
         ]));
     } else {
-        for commit in &app.recent_commits {
+        for commit in commits {
             detail_lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
                 Span::raw(commit.clone()),
@@ -574,8 +523,8 @@ fn draw_branch_detail(f: &mut Frame, app: &App) {
     f.render_widget(detail_dialog, popup_area);
 }
 
-/// 绘制 loading 提示（简单紧凑文字版）
-fn draw_loading(f: &mut Frame, app: &App) {
+/// 绘制 loading 提示
+fn draw_loading(f: &mut Frame, loading_state: &crate::domain::LoadingState) {
     let area = f.area();
 
     // 计算垂直居中的弹窗位置
@@ -591,11 +540,16 @@ fn draw_loading(f: &mut Frame, app: &App) {
         height: popup_height.min(area.height),
     };
 
+    let message = match loading_state {
+        crate::domain::LoadingState::Loading { message, .. } => message.clone(),
+        _ => String::from("加载中..."),
+    };
+
     let loading_lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                &app.loading_message,
+                &message,
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -620,4 +574,41 @@ fn draw_loading(f: &mut Frame, app: &App) {
         .alignment(Alignment::Center);
 
     f.render_widget(loading_widget, popup_area);
+}
+
+/// 绘制 Toast 提示
+fn draw_toast(f: &mut Frame, toast: &crate::app::Toast) {
+    let area = f.area();
+
+    // 在顶部居中显示
+    let popup_width = 50;
+    let popup_height = 3;
+    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = 1; // 顶部
+
+    let popup_area = ratatui::layout::Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width.min(area.width),
+        height: popup_height.min(area.height),
+    };
+
+    let (bg_color, fg_color) = match toast.level {
+        crate::app::ToastLevel::Info => (Color::Blue, Color::White),
+        crate::app::ToastLevel::Success => (Color::Green, Color::White),
+        crate::app::ToastLevel::Warning => (Color::Yellow, Color::Black),
+        crate::app::ToastLevel::Error => (Color::Red, Color::White),
+    };
+
+    let toast_widget = Paragraph::new(toast.message.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(fg_color))
+                .style(Style::default().bg(bg_color)),
+        )
+        .style(Style::default().fg(fg_color))
+        .alignment(Alignment::Center);
+
+    f.render_widget(toast_widget, popup_area);
 }

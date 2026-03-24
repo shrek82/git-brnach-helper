@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
+// 使用 domain 模块中的类型
+use crate::domain::RemoteBranch;
+
 /// 获取指定远程的所有远程分支名称
 /// 返回格式如：["origin/main", "origin/feature/login", ...]
 pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
@@ -331,4 +334,93 @@ pub fn has_uncommitted_changes() -> Result<bool> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("检查未提交内容失败：{}", stderr.trim())
     }
+}
+
+// === 以下是新架构使用的函数（带 _inner 后缀）===
+
+/// 获取远程和本地分支列表（合并）
+pub fn list_local_branches_inner(remote_name: &str) -> Result<Vec<RemoteBranch>> {
+    use std::collections::HashSet;
+
+    // 获取远程分支
+    let remote_refs = list_remote_branches(remote_name)?;
+    // 获取本地分支
+    let local_branches = list_local_branches()?;
+    let local_set: HashSet<&String> = local_branches.iter().collect();
+
+    let mut branches = Vec::with_capacity(remote_refs.len());
+    for remote_ref in remote_refs {
+        let short_name = remote_ref
+            .strip_prefix(&format!("{}/", remote_name))
+            .unwrap_or(&remote_ref)
+            .to_string();
+
+        let has_local = local_set.contains(&short_name);
+        let local_name = if has_local { Some(short_name.clone()) } else { None };
+
+        // 获取提交信息
+        let (time, author, message) = if has_local {
+            get_last_commit_info(&short_name).unwrap_or_else(|_| (String::from("-"), String::from("-"), String::from("-")))
+        } else {
+            get_remote_last_commit_info(&remote_ref).unwrap_or_else(|_| (String::from("-"), String::from("-"), String::from("-")))
+        };
+
+        branches.push(RemoteBranch {
+            remote_ref,
+            short_name,
+            has_local,
+            local_name,
+            selected: false,
+            ahead: 0,
+            behind: 0,
+            last_commit_time: time,
+            last_commit_author: author,
+            last_commit_message: message,
+        });
+    }
+
+    // 按名称排序
+    branches.sort_by(|a, b| a.short_name.to_lowercase().cmp(&b.short_name.to_lowercase()));
+
+    Ok(branches)
+}
+
+/// 同步本地分支
+pub fn sync_local_branch_inner(branch_name: &str) -> Result<()> {
+    sync_local_branch(branch_name)
+}
+
+/// 创建本地分支
+pub fn create_local_branch_inner(remote_ref: &str, branch_name: &str) -> Result<()> {
+    create_local_branch(remote_ref, branch_name)
+}
+
+/// 切换分支
+pub fn checkout_branch_inner(branch_name: &str) -> Result<()> {
+    checkout_branch(branch_name)
+}
+
+/// 检查未提交修改
+pub fn has_uncommitted_changes_inner() -> Result<bool> {
+    has_uncommitted_changes()
+}
+
+/// 获取提交信息
+pub fn get_last_commit_info_inner(branch_name: &str) -> Result<(String, String, String)> {
+    get_last_commit_info(branch_name)
+}
+
+/// 获取远程提交信息
+pub fn get_remote_last_commit_info_inner(remote_ref: &str) -> Result<(String, String, String)> {
+    get_remote_last_commit_info(remote_ref)
+}
+
+/// 获取最近提交记录
+pub fn get_recent_commits_inner(branch_name: &str) -> Result<Vec<String>> {
+    get_recent_commits(branch_name)
+}
+
+/// 删除本地分支
+pub fn delete_local_branch_inner(branch_name: &str, force: bool) -> Result<()> {
+    delete_local_branch(branch_name, force)
 }

@@ -1,20 +1,28 @@
+//! Git 分支管理 TUI 工具
+//!
+//! 基于 Elm 架构（Model-View-Update）实现
+
 mod app;
+mod domain;
 mod git;
+mod messages;
 mod ui;
 
 use anyhow::Result;
+use app::{update, AppState, Command};
 use chrono::Local;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{self, EnableMouseCapture, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{enable_raw_mode, EnterAlternateScreen},
 };
+use messages::Message;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
-
-use app::App;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 fn main() -> Result<()> {
     // 清空之前的 debug.log 文件
@@ -35,124 +43,47 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // 创建应用状态
-    let mut app = App::new();
+    let mut state = AppState::new();
 
-    // 运行应用
-    let res = run_app(&mut terminal, &mut app);
+    // 获取当前分支
+    state.current_branch = git::get_current_branch().unwrap_or_else(|_| String::from("unknown"));
 
-    // 恢复终端
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    // 创建消息通道
+    let (msg_tx, msg_rx) = mpsc::channel::<Message>();
 
-    if let Err(err) = res {
-        eprintln!("错误：{:?}", err);
-    }
+    // 初始化：加载分支列表
+    let remote_name = state.remote_name.clone();
+    let init_cmd = Command::perform(
+        move || git::list_local_branches_inner(&remote_name),
+        |result| Message::BranchesLoaded(result.map_err(|e| e.to_string())),
+    );
+    init_cmd.execute(msg_tx.clone());
 
-    Ok(())
-}
-
-fn run_app<B: ratatui::prelude::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> Result<()> {
-    // 初始化：直接从本地缓存加载分支列表，不显示 loading
-    app.init_branches_from_cache();
-
+    // 主循环
+    let mut last_tick = Instant::now();
     loop {
-        // 每帧检查加载是否完成（仅用于 fetch 远程时）
-        app.poll_loading_complete()?;
+        // 处理消息
+        while let Ok(msg) = msg_rx.try_recv() {
+            let cmd = update(&mut state, msg);
+            cmd.execute(msg_tx.clone());
+        }
 
-        terminal.draw(|f| ui::draw(f, app))?;
+        // Tick 事件（用于超时、动画）
+        if last_tick.elapsed() >= Duration::from_millis(100) {
+            let cmd = update(&mut state, Message::Tick);
+            cmd.execute_sync(msg_tx.clone());
+            last_tick = Instant::now();
+        }
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                // 如果显示删除确认对话框，优先处理
-                if app.show_delete_confirm {
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            app.confirm_delete(true, false);
-                        }
-                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                            app.confirm_delete(false, false);
-                        }
-                        _ => {}
-                    }
-                    continue;
-                }
+        // 渲染
+        terminal.draw(|f| ui::draw(f, &state))?;
 
-                // 如果显示分支详情弹窗，按任意键关闭
-                if app.show_branch_detail {
-                    app.close_branch_detail();
-                    continue;
-                }
-
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('?') => {
-                        // 显示/隐藏帮助 overlay
-                        app.toggle_help_overlay();
-                    }
-                    KeyCode::Char(' ') => {
-                        // 勾选/取消勾选当前分支
-                        app.toggle_selection();
-                    }
-                    KeyCode::Char('a') => {
-                        // 全选/取消全选
-                        app.toggle_select_all();
-                    }
-                    KeyCode::Char('l') => {
-                        // 获取本地分支（不 fetch 远程）
-                        app.start_loading_branches(false);
-                    }
-                    KeyCode::Char('R') | KeyCode::Char('r') => {
-                        // 刷新分支列表：先 fetch 远程，再重新加载
-                        app.start_loading_branches(true);
-                    }
-                    KeyCode::Enter => {
-                        // 显示分支详情弹窗
-                        app.show_branch_detail_popup();
-                    }
-                    KeyCode::Char('s') | KeyCode::Char('S') => {
-                        // 同步选中的分支
-                        app.sync_selected_branches()?;
-                    }
-                    KeyCode::Char('b') => {
-                        // 批量创建选中的远程分支到本地
-                        app.execute_selected_branches()?;
-                    }
-                    KeyCode::Char('c') => {
-                        // 切换到当前选中的分支
-                        app.checkout_current_selection()?;
-                    }
-                    KeyCode::Char('d') => {
-                        // 删除选中的分支（显示确认对话框）
-                        app.request_delete(false);
-                    }
-                    KeyCode::Char('D') => {
-                        // 强制删除选中的分支（显示确认对话框）
-                        app.request_delete(true);
-                    }
-                    KeyCode::Char('/') => {
-                        // 进入过滤模式（简单实现：直接设置过滤）
-                        app.set_filter("");
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        app.select_previous();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        app.select_next();
-                    }
-                    _ => {
-                        // 如果帮助 overlay 显示中，按任意键关闭
-                        if app.show_help_overlay {
-                            app.toggle_help_overlay();
-                        }
-                    }
+        // 处理输入
+        if event::poll(Duration::from_millis(10))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    let cmd = update(&mut state, Message::KeyPressed(key.code));
+                    cmd.execute(msg_tx.clone());
                 }
             }
         }
