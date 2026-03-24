@@ -182,6 +182,23 @@ pub fn delete_local_branch(branch_name: &str, force: bool) -> Result<()> {
     }
 }
 
+/// 删除远程分支
+/// branch_name: 要删除的分支名称，如 "feature/login"
+/// remote_name: 远程仓库名称，如 "origin"
+pub fn delete_remote_branch(branch_name: &str, remote_name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .args(["push", remote_name, "--delete", branch_name])
+        .output()
+        .context("执行 git push 命令失败")?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("删除远程分支 '{}' 失败：{}", branch_name, stderr.trim())
+    }
+}
+
 /// 切换到指定分支
 /// branch_name: 要切换到的分支名称，如 "feature/login"
 pub fn checkout_branch(branch_name: &str) -> Result<()> {
@@ -440,4 +457,9 @@ pub fn get_recent_commits_inner(branch_name: &str) -> Result<Vec<String>> {
 /// 删除本地分支
 pub fn delete_local_branch_inner(branch_name: &str, force: bool) -> Result<()> {
     delete_local_branch(branch_name, force)
+}
+
+/// 删除远程分支
+pub fn delete_remote_branch_inner(branch_name: &str, remote_name: &str) -> Result<()> {
+    delete_remote_branch(branch_name, remote_name)
 }

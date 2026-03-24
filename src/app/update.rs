@@ -144,6 +144,12 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             Command::none()
         }
 
+        // === 分支详情准备好显示 ===
+        Message::BranchDetailReady { branch_name, commits } => {
+            state.modal = Some(ModalState::BranchDetail { branch_name, commits });
+            Command::none()
+        }
+
         // === 内部事件：处理超时、动画 ===
         Message::Tick => {
             Command::none()
@@ -169,11 +175,11 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
     // 如果显示弹窗，优先处理弹窗
     if let Some(modal) = state.modal.take() {
         match modal {
-            ModalState::DeleteConfirm { branches, force } => {
+            ModalState::DeleteConfirm { branches, delete_remote } => {
                 match key {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
                         // 确认删除：执行批量删除
-                        return delete_branches_inner(branches, force);
+                        return delete_branches_inner(branches, delete_remote);
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                         state.add_log("已取消删除操作");
@@ -181,7 +187,7 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
                     }
                     _ => {
                         // 其他键重新设置弹窗
-                        state.modal = Some(ModalState::DeleteConfirm { branches, force });
+                        state.modal = Some(ModalState::DeleteConfirm { branches, delete_remote });
                         return Command::none();
                     }
                 }
@@ -273,12 +279,12 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
         }
 
         KeyCode::Char('d') => {
-            // 删除选中的分支（显示确认对话框）
+            // 删除选中的本地分支
             request_delete_branches(state, false)
         }
 
         KeyCode::Char('D') => {
-            // 强制删除选中的分支
+            // 删除选中的本地分支 + 远程分支
             request_delete_branches(state, true)
         }
 
@@ -485,7 +491,7 @@ fn checkout_current_branch(state: &AppState) -> Command<Message> {
     )
 }
 
-fn request_delete_branches(state: &mut AppState, force: bool) -> Command<Message> {
+fn request_delete_branches(state: &mut AppState, delete_remote: bool) -> Command<Message> {
     let to_delete: Vec<String> = state
         .branches
         .items
@@ -502,7 +508,7 @@ fn request_delete_branches(state: &mut AppState, force: bool) -> Command<Message
     // 显示确认对话框
     state.modal = Some(ModalState::DeleteConfirm {
         branches: to_delete,
-        force,
+        delete_remote,
     });
 
     Command::none()
@@ -529,42 +535,39 @@ fn show_branch_detail(state: &mut AppState) -> Command<Message> {
         return Command::none();
     }
 
-    // 获取最近提交记录
+    // 获取最近提交记录并显示详情弹窗
     Command::perform(
         move || crate::git::get_recent_commits_inner(&branch_name_for_closure),
         move |result| {
-            let commits = result.unwrap_or_else(|_| vec![String::from("获取提交记录失败")]);
-            // 这里需要更新状态来显示弹窗，暂时简化处理
-            Message::CommitInfoLoaded {
-                branch_name,
-                info: crate::messages::CommitInfo {
-                    time: String::from("-"),
-                    author: String::from("-"),
-                    message: commits.join("; "),
-                },
-            }
+            let commits = result.unwrap_or_else(|_| vec![]);
+            Message::BranchDetailReady { branch_name, commits }
         },
     )
 }
 
 /// 删除分支的内部实现
-fn delete_branches_inner(branches: Vec<String>, force: bool) -> Command<Message> {
+fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<Message> {
     if branches.is_empty() {
         return Command::none();
     }
 
+    let remote_name = String::from("origin");
+
     Command::batch(
         branches
             .into_iter()
-            .map(|branch_name| {
+            .map(move |branch_name| {
                 let name = branch_name.clone();
                 let name_for_result = name.clone();
-                Command::perform(
-                    move || crate::git::delete_local_branch_inner(&name, force),
+                let remote_name_for_delete = remote_name.clone();
+
+                // 先删除本地分支
+                let delete_local = Command::perform(
+                    move || crate::git::delete_local_branch_inner(&name, false),
                     move |result| {
                         let (success, message) = match result {
-                            Ok(_) => (true, format!("删除分支成功：{}", name_for_result)),
-                            Err(e) => (false, format!("删除分支失败：{}: {}", name_for_result, e)),
+                            Ok(_) => (true, format!("删除本地分支成功：{}", name_for_result)),
+                            Err(e) => (false, format!("删除本地分支失败：{}: {}", name_for_result, e)),
                         };
                         Message::BranchDeleted {
                             branch_name: name_for_result,
@@ -572,7 +575,30 @@ fn delete_branches_inner(branches: Vec<String>, force: bool) -> Command<Message>
                             message,
                         }
                     },
-                )
+                );
+
+                if delete_remote {
+                    // 如果需要删除远程分支，再执行远程删除
+                    let name_for_remote = branch_name.clone();
+                    let name_for_remote_result = branch_name;
+                    let delete_remote_cmd = Command::perform(
+                        move || crate::git::delete_remote_branch_inner(&name_for_remote, &remote_name_for_delete),
+                        move |result| {
+                            let (success, message) = match result {
+                                Ok(_) => (true, format!("删除远程分支成功：{}", name_for_remote_result)),
+                                Err(e) => (false, format!("删除远程分支失败：{}: {}", name_for_remote_result, e)),
+                            };
+                            Message::BranchDeleted {
+                                branch_name: name_for_remote_result,
+                                success,
+                                message,
+                            }
+                        },
+                    );
+                    Command::batch(vec![delete_local, delete_remote_cmd])
+                } else {
+                    delete_local
+                }
             })
             .collect(),
     )

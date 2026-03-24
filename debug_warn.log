@@ -1,0 +1,92 @@
+Compiling git-helper v0.1.0 (/Users/youxiao/projects/git-helper)
+warning: associated function `perform_result` is never used
+  --> src/app/commands.rs:30:12
+   |
+13 | impl<Msg: Send + 'static> Command<Msg> {
+   | -------------------------------------- associated function in this implementation
+...
+30 |     pub fn perform_result<T, E, F, M>(task: F, mapper: M) -> Self
+   |            ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `BranchDetail` is never constructed
+  --> src/app/state.rs:34:5
+   |
+27 | pub enum ModalState {
+   |          ---------- variant in this enum
+...
+34 |     BranchDetail {
+   |     ^^^^^^^^^^^^
+   |
+   = note: `ModalState` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated function `new` is never used
+  --> src/domain/branch.rs:35:12
+   |
+33 | impl RemoteBranch {
+   | ----------------- associated function in this implementation
+34 |     /// 创建一个新的 RemoteBranch（用于测试）
+35 |     pub fn new(remote_ref: String, short_name: String) -> Self {
+   |            ^^^
+
+warning: field `sort_by` is never read
+  --> src/domain/branch.rs:58:9
+   |
+52 | pub struct BranchList {
+   |            ---------- field in this struct
+...
+58 |     pub sort_by: SortField,
+   |         ^^^^^^^
+
+warning: method `filtered_iter` is never used
+  --> src/domain/branch.rs:99:12
+   |
+63 | impl BranchList {
+   | --------------- method in this implementation
+...
+99 |     pub fn filtered_iter(&self, filter_text: &str) -> Box<dyn Iterator<Item = &RemoteBranch> + '_> {
+   |            ^^^^^^^^^^^^^
+
+warning: method `is_error` is never used
+  --> src/domain/loading.rs:25:12
+   |
+18 | impl LoadingState {
+   | ----------------- method in this implementation
+...
+25 |     pub fn is_error(&self) -> bool {
+   |            ^^^^^^^^
+
+warning: variants `LastCommitTime` and `Author` are never constructed
+  --> src/domain/loading.rs:41:5
+   |
+38 | pub enum SortField {
+   |          --------- variants in this enum
+...
+41 |     LastCommitTime,
+   |     ^^^^^^^^^^^^^^
+42 |     Author,
+   |     ^^^^^^
+   |
+   = note: `SortField` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `get_branch_ahead_behind` is never used
+   --> src/git.rs:204:8
+    |
+204 | pub fn get_branch_ahead_behind(branch_name: &str) -> Result<(usize, usize)> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variant `FilterChanged` is never constructed
+  --> src/messages.rs:15:5
+   |
+10 | pub enum Message {
+   |          ------- variant in this enum
+...
+15 |     FilterChanged(String),
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Message` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `git-helper` (bin "git-helper") generated 9 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.08s
+     Running `target/debug/git-helper ./`

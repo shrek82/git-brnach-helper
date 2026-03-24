@@ -28,7 +28,7 @@ pub enum ModalState {
     /// 删除确认
     DeleteConfirm {
         branches: Vec<String>,
-        force: bool,
+        delete_remote: bool,  // true: 删除远程分支，false: 只删除本地
     },
     /// 分支详情
     BranchDetail {

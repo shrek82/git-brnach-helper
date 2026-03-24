@@ -50,6 +50,11 @@ pub enum Message {
         success: bool,
         message: String,
     },
+    /// 分支详情已准备好显示
+    BranchDetailReady {
+        branch_name: String,
+        commits: Vec<String>,
+    },
 
     // === 内部事件 ===
     /// 每帧调用的 tick 事件（用于动画、超时等）

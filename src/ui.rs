@@ -38,8 +38,8 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     }
 
     // 绘制删除确认对话框
-    if let Some(crate::app::ModalState::DeleteConfirm { branches, .. }) = &state.modal {
-        draw_delete_confirm(f, branches.len());
+    if let Some(crate::app::ModalState::DeleteConfirm { branches, delete_remote }) = &state.modal {
+        draw_delete_confirm(f, branches.len(), *delete_remote);
     }
 
     // 绘制分支详情弹窗
@@ -287,7 +287,9 @@ fn draw_help(f: &mut Frame, area: ratatui::layout::Rect) {
         Span::styled(" c ", Style::default().fg(Color::Cyan)),
         Span::raw("切换  "),
         Span::styled(" d ", Style::default().fg(Color::Red)),
-        Span::raw("删除  "),
+        Span::raw("删本地  "),
+        Span::styled(" D ", Style::default().fg(Color::Red)),
+        Span::raw("删远程  "),
         Span::styled(" / ", Style::default().fg(Color::Yellow)),
         Span::raw("过滤  "),
         Span::styled(" l ", Style::default().fg(Color::Yellow)),
@@ -364,7 +366,7 @@ fn draw_help_overlay(f: &mut Frame) {
         ]),
         Line::from(vec![
             Span::styled("  D        ", Style::default().fg(Color::Red)),
-            Span::raw("强制删除选中的分支"),
+            Span::raw("删除本地 + 远程分支"),
         ]),
         Line::from(vec![
             Span::styled("  l        ", Style::default().fg(Color::Yellow)),
@@ -407,12 +409,12 @@ fn draw_help_overlay(f: &mut Frame) {
 }
 
 /// 绘制删除确认对话框
-fn draw_delete_confirm(f: &mut Frame, count: usize) {
+fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let area = f.area();
 
     // 计算居中弹窗大小
-    let popup_width = 50;
-    let popup_height = 8;
+    let popup_width = 60;
+    let popup_height = 10;
     let popup_x = (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = (area.height.saturating_sub(popup_height)) / 2;
 
@@ -423,11 +425,17 @@ fn draw_delete_confirm(f: &mut Frame, count: usize) {
         height: popup_height.min(area.height),
     };
 
+    let delete_type = if delete_remote {
+        "本地 + 远程分支"
+    } else {
+        "本地分支"
+    };
+
     let confirm_lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled("⚠️  确认删除 ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{} 个分支？", count)),
+            Span::raw(format!("{} 个{}？", count, delete_type)),
         ]),
         Line::from(""),
         Line::from(vec![
