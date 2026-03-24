@@ -102,16 +102,33 @@ pub fn list_local_branches() -> Result<Vec<String>> {
 
 /// 同步已存在的本地分支到远程（git pull）
 /// branch_name: 本地分支名称，如 "feature/login"
+/// 注意：此函数会切换到目标分支执行 pull
 pub fn sync_local_branch(branch_name: &str) -> Result<()> {
-    // 先切换到目标分支
-    let checkout_output = Command::new("git")
-        .args(["checkout", branch_name])
+    // 获取当前分支
+    let current_branch_output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
-        .context("执行 git checkout 命令失败")?;
+        .context("执行 git rev-parse 命令失败")?;
 
-    if !checkout_output.status.success() {
-        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        anyhow::bail!("切换到分支 '{}' 失败：{}", branch_name, stderr.trim());
+    if !current_branch_output.status.success() {
+        let stderr = String::from_utf8_lossy(&current_branch_output.stderr);
+        anyhow::bail!("获取当前分支失败：{}", stderr.trim());
+    }
+
+    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
+
+    // 如果已经是目标分支，不需要切换
+    if current_branch != branch_name {
+        // 先切换到目标分支
+        let checkout_output = Command::new("git")
+            .args(["checkout", branch_name])
+            .output()
+            .context("执行 git checkout 命令失败")?;
+
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+            anyhow::bail!("切换到分支 '{}' 失败：{}", branch_name, stderr.trim());
+        }
     }
 
     // 执行 git pull 同步

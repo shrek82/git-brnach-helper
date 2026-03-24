@@ -20,7 +20,7 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
                     branch.selected = !branch.selected;
                     let status = if branch.selected { "已选中" } else { "已取消" };
                     let branch_name = branch.short_name.clone();
-                    drop(branch); // 释放借用
+                    let _ = branch; // 忽略借用
                     state.add_log(&format!("{}: {}", branch_name, status));
                 }
             }
@@ -217,9 +217,15 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
             Command::perform(
                 move || {
                     // 先 fetch
-                    let _ = std::process::Command::new("git")
+                    let fetch_output = std::process::Command::new("git")
                         .args(["fetch", &remote_name, "--quiet"])
                         .output();
+
+                    // 忽略 fetch 错误，继续获取分支列表
+                    if let Err(e) = fetch_output {
+                        eprintln!("fetch 远程失败：{}", e);
+                    }
+
                     // 再获取分支列表
                     crate::git::list_local_branches_inner(&remote_name)
                 },
