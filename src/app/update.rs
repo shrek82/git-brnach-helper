@@ -2,7 +2,7 @@
 //!
 //! 所有状态变更通过 update 函数处理
 
-use crate::app::{AppState, Command, ModalState, Toast};
+use crate::app::{AppState, Command, ModalState};
 use crate::messages::Message;
 use crossterm::event::KeyCode;
 
@@ -13,24 +13,15 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
         // === 按键处理 ===
         Message::KeyPressed(key_code) => handle_key_press(state, key_code),
 
-        // === 过滤处理 ===
-        Message::FilterChanged(text) => {
-            state.filter_text = text.clone();
-            if text.is_empty() {
-                state.toast = Some(Toast::info("已取消过滤"));
-            } else {
-                state.toast = Some(Toast::info(format!("过滤：{}", text)));
-            }
-            Command::none()
-        }
-
         // === 分支选择切换 ===
         Message::BranchToggled(filtered_idx) => {
             if let Some(original_idx) = state.filtered_index_to_original(filtered_idx) {
                 if let Some(branch) = state.branches.items.get_mut(original_idx) {
                     branch.selected = !branch.selected;
                     let status = if branch.selected { "已选中" } else { "已取消" };
-                    state.toast = Some(Toast::info(format!("{}: {}", branch.short_name, status)));
+                    let branch_name = branch.short_name.clone();
+                    drop(branch); // 释放借用
+                    state.add_log(&format!("{}: {}", branch_name, status));
                 }
             }
             Command::none()
@@ -51,7 +42,6 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             }
 
             let msg = if all_selected { "已取消全选" } else { "已全选" };
-            state.toast = Some(Toast::info(msg));
             state.add_log(msg);
             Command::none()
         }
@@ -67,7 +57,6 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
                         };
 
                     let count = state.branches.items.len();
-                    state.toast = Some(Toast::success(format!("已加载 {} 个分支", count)));
                     state.add_log(&format!("刷新分支列表，共 {} 个远程分支", count));
 
                     // 返回加载提交信息的命令
@@ -77,7 +66,6 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
                     state.branches.loading_state = crate::domain::LoadingState::Error {
                         message: e.clone(),
                     };
-                    state.toast = Some(Toast::error(format!("加载失败：{}", e)));
                     state.add_log(&format!("加载失败：{}", e));
                     Command::none()
                 }
@@ -101,14 +89,11 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             message,
         } => {
             if success {
-                state.toast = Some(Toast::success(format!("创建分支成功：{}", branch_name)));
                 state.branches.update_branch(&branch_name, |branch| {
                     branch.has_local = true;
                     branch.local_name = Some(branch_name.clone());
                     branch.selected = false;
                 });
-            } else {
-                state.toast = Some(Toast::error(format!("创建分支失败：{}", message)));
             }
             state.add_log(&message);
             Command::none()
@@ -120,11 +105,10 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             message,
         } => {
             if success {
-                state.toast = Some(Toast::success(format!("同步分支成功：{}", branch_name)));
+                state.add_log(&format!("同步分支成功：{}", branch_name));
             } else {
-                state.toast = Some(Toast::error(format!("同步分支失败：{}", message)));
+                state.add_log(&message);
             }
-            state.add_log(&message);
             Command::none()
         }
 
@@ -134,16 +118,15 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             message,
         } => {
             if success {
-                state.toast = Some(Toast::success(format!("删除分支成功：{}", branch_name)));
+                state.add_log(&format!("删除分支成功：{}", branch_name));
                 state.branches.update_branch(&branch_name, |branch| {
                     branch.has_local = false;
                     branch.local_name = None;
                     branch.selected = false;
                 });
             } else {
-                state.toast = Some(Toast::error(format!("删除分支失败：{}", message)));
+                state.add_log(&message);
             }
-            state.add_log(&message);
             Command::none()
         }
 
@@ -154,22 +137,20 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
         } => {
             if success {
                 state.current_branch = branch_name.clone();
-                state.toast = Some(Toast::success(format!("已切换到分支：{}", branch_name)));
+                state.add_log(&format!("已切换到分支：{}", branch_name));
             } else {
-                state.toast = Some(Toast::error(format!("切换分支失败：{}", message)));
+                state.add_log(&message);
             }
-            state.add_log(&message);
             Command::none()
         }
 
         // === 内部事件：处理超时、动画 ===
         Message::Tick => {
-            // 清理过期的 toast
-            if let Some(toast) = &state.toast {
-                if toast.is_expired() {
-                    state.toast = None;
-                }
-            }
+            Command::none()
+        }
+
+        // === 其他消息（预留） ===
+        Message::FilterChanged(_) => {
             Command::none()
         }
     }
@@ -189,7 +170,7 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
                         return delete_branches_inner(branches, force);
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                        state.toast = Some(Toast::info("已取消删除操作"));
+                        state.add_log("已取消删除操作");
                         return Command::none();
                     }
                     _ => {
@@ -502,7 +483,7 @@ fn request_delete_branches(state: &mut AppState, force: bool) -> Command<Message
         .collect();
 
     if to_delete.is_empty() {
-        state.toast = Some(Toast::warning("没有选中的本地分支可删除"));
+        state.add_log("没有选中的本地分支可删除");
         return Command::none();
     }
 
@@ -517,7 +498,7 @@ fn request_delete_branches(state: &mut AppState, force: bool) -> Command<Message
 
 fn show_branch_detail(state: &mut AppState) -> Command<Message> {
     if state.branches.items.is_empty() {
-        state.toast = Some(Toast::warning("没有可选的分支"));
+        state.add_log("没有可选的分支");
         return Command::none();
     }
 
@@ -532,10 +513,7 @@ fn show_branch_detail(state: &mut AppState) -> Command<Message> {
     let branch_name_for_closure = branch_name.clone();
 
     if !branch.has_local {
-        state.toast = Some(Toast::warning(format!(
-            "分支 '{}' 尚未创建到本地",
-            branch_name
-        )));
+        state.add_log(&format!("分支 '{}' 尚未创建到本地", branch_name));
         return Command::none();
     }
 

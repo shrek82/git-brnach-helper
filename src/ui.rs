@@ -51,13 +51,6 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     if state.branches.loading_state.is_loading() {
         draw_loading(f, &state.branches.loading_state);
     }
-
-    // 绘制 Toast 提示
-    if let Some(toast) = &state.toast {
-        if !toast.is_expired() {
-            draw_toast(f, toast);
-        }
-    }
 }
 
 /// 绘制标题栏
@@ -574,69 +567,4 @@ fn draw_loading(f: &mut Frame, loading_state: &crate::domain::LoadingState) {
         .alignment(Alignment::Center);
 
     f.render_widget(loading_widget, popup_area);
-}
-
-/// 绘制 Toast 提示
-fn draw_toast(f: &mut Frame, toast: &crate::app::Toast) {
-    let area = f.area();
-
-    // 根据消息长度动态计算宽度
-    let message_len = toast.message.len();
-    let popup_width = (message_len as u16 + 8).min(60).max(30);
-    let popup_height = 3;
-    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = 1; // 顶部
-
-    let popup_area = ratatui::layout::Rect {
-        x: popup_x,
-        y: popup_y,
-        width: popup_width.min(area.width),
-        height: popup_height.min(area.height),
-    };
-
-    // 优化配色：使用柔和的 RGB 颜色和渐变效果
-    let (border_color, bg_color, prefix, prefix_color) = match toast.level {
-        crate::app::ToastLevel::Info => (
-            Color::Rgb(100, 150, 255),
-            Color::Rgb(30, 40, 60),
-            "ℹ 提示",
-            Color::Rgb(100, 150, 255),
-        ),
-        crate::app::ToastLevel::Success => (
-            Color::Rgb(50, 200, 100),
-            Color::Rgb(20, 50, 30),
-            "✓ 成功",
-            Color::Rgb(50, 200, 100),
-        ),
-        crate::app::ToastLevel::Warning => (
-            Color::Rgb(255, 180, 50),
-            Color::Rgb(50, 45, 20),
-            "⚠ 警告",
-            Color::Rgb(255, 180, 50),
-        ),
-        crate::app::ToastLevel::Error => (
-            Color::Rgb(255, 80, 80),
-            Color::Rgb(60, 25, 25),
-            "✗ 错误",
-            Color::Rgb(255, 80, 80),
-        ),
-    };
-
-    // 构建带前缀的消息
-    let styled_message = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(prefix_color).add_modifier(Modifier::BOLD)),
-        Span::styled(" | ", Style::default().fg(Color::Rgb(150, 150, 150))),
-        Span::styled(toast.message.clone(), Style::default().fg(Color::Rgb(220, 220, 220))),
-    ]);
-
-    let toast_widget = Paragraph::new(styled_message)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                .style(Style::default().bg(bg_color)),
-        )
-        .alignment(Alignment::Center);
-
-    f.render_widget(toast_widget, popup_area);
 }
