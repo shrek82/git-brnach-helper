@@ -536,18 +536,34 @@ impl App {
             return Ok(());
         }
 
-        let branch = &self.remote_branches[self.cursor];
+        let branch_name = self.remote_branches[self.cursor].short_name.clone();
+        let has_local = self.remote_branches[self.cursor].has_local;
 
-        if !branch.has_local {
-            self.status_message = format!("分支 '{}' 尚未创建到本地", branch.short_name);
+        if !has_local {
+            self.status_message = format!("分支 '{}' 尚未创建到本地", branch_name);
             return Ok(());
         }
 
-        match git::checkout_branch(&branch.short_name) {
+        // 检查是否有未提交的修改
+        if git::has_uncommitted_changes()? {
+            self.status_message = String::from("当前工作树有未提交的修改，无法切换分支");
+            self.add_log("切换分支失败：存在未提交的修改");
+            return Ok(());
+        }
+
+        // 如果是当前所在的分支，不需要切换
+        if branch_name == self.current_branch {
+            self.status_message = format!("已经在分支 '{}' 上", branch_name);
+            return Ok(());
+        }
+
+        match git::checkout_branch(&branch_name) {
             Ok(_) => {
-                let msg = format!("已切换到分支：{}", branch.short_name);
+                let msg = format!("已切换到分支：{}", branch_name);
                 self.status_message = msg.clone();
                 self.add_log(&msg);
+                // 更新当前分支名称
+                self.current_branch = branch_name;
             }
             Err(e) => {
                 let msg = format!("切换失败：{}", e);

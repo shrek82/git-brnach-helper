@@ -312,3 +312,23 @@ pub fn get_current_branch() -> Result<String> {
         anyhow::bail!("获取当前分支失败：{}", stderr.trim())
     }
 }
+
+/// 检查当前工作树是否有未提交的修改
+/// 返回 true 表示有未提交的内容（包括已暂存和未暂存的修改）
+pub fn has_uncommitted_changes() -> Result<bool> {
+    // 使用 git status --porcelain 检查是否有修改
+    // 如果有任何输出，说明有未提交的内容
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .context("执行 git status 命令失败")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // 如果有任何输出（非空），说明有未提交的内容
+        Ok(!stdout.trim().is_empty())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("检查未提交内容失败：{}", stderr.trim())
+    }
+}
