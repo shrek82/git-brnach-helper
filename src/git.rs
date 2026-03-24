@@ -34,16 +34,6 @@ pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
     Ok(branches)
 }
 
-/// 后台 fetch 远程仓库（异步更新）
-pub fn fetch_remote_async(remote_name: &str) {
-    let remote_name = remote_name.to_string();
-    std::thread::spawn(move || {
-        let _ = Command::new("git")
-            .args(["fetch", &remote_name, "--prune", "--quiet"])
-            .output();
-    });
-}
-
 /// 基于远程分支创建本地分支
 /// remote_ref: 远程分支引用，如 "origin/feature/login"
 /// branch_name: 新本地分支名称，如 "feature/login"

@@ -47,14 +47,11 @@ fn run_app<B: ratatui::prelude::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
-    // 初始化：异步加载分支列表（非阻塞）
-    app.start_loading_branches();
-
-    // 后台异步 fetch 更新远程引用
-    git::fetch_remote_async(&app.remote_name);
+    // 初始化：直接从本地缓存加载分支列表，不显示 loading
+    app.init_branches_from_cache();
 
     loop {
-        // 每帧检查加载是否完成
+        // 每帧检查加载是否完成（仅用于 fetch 远程时）
         app.poll_loading_complete()?;
 
         terminal.draw(|f| ui::draw(f, app))?;
@@ -114,9 +111,8 @@ fn run_app<B: ratatui::prelude::Backend>(
                             app.toggle_select_all();
                         }
                         KeyCode::Char('R') | KeyCode::Char('r') => {
-                            // 刷新分支列表（异步加载）
-                            app.start_loading_branches();
-                            git::fetch_remote_async(&app.remote_name);
+                            // 刷新分支列表：先 fetch 远程，再重新加载
+                            app.start_loading_branches(true);
                         }
                         KeyCode::Enter => {
                             // 显示分支详情弹窗
