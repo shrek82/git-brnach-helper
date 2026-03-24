@@ -499,16 +499,28 @@ fn checkout_current_branch(state: &AppState) -> Command<Message> {
 }
 
 fn request_delete_branches(state: &mut AppState, delete_remote: bool) -> Command<Message> {
-    let to_delete: Vec<String> = state
-        .branches
-        .items
-        .iter()
-        .filter(|b| b.selected && b.has_local && !state.is_protected_branch(&b.short_name))
-        .map(|b| b.short_name.clone())
-        .collect();
+    let to_delete: Vec<String> = if delete_remote {
+        // D 删除：可以删除纯远程分支（无需本地分支）
+        state.branches.items
+            .iter()
+            .filter(|b| b.selected && !state.is_protected_branch(&b.short_name))
+            .map(|b| b.short_name.clone())
+            .collect()
+    } else {
+        // d 删除：只删除有本地分支的
+        state.branches.items
+            .iter()
+            .filter(|b| b.selected && b.has_local && !state.is_protected_branch(&b.short_name))
+            .map(|b| b.short_name.clone())
+            .collect()
+    };
 
     if to_delete.is_empty() {
-        state.add_log("没有选中的本地分支可删除");
+        if delete_remote {
+            state.add_log("没有选中的分支可删除");
+        } else {
+            state.add_log("没有选中的本地分支可删除");
+        }
         return Command::none();
     }
 
@@ -568,27 +580,11 @@ fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<
                 let name_for_result = name.clone();
                 let remote_name_for_delete = remote_name.clone();
 
-                // 先删除本地分支
-                let delete_local = Command::perform(
-                    move || crate::git::delete_local_branch_inner(&name, false),
-                    move |result| {
-                        let (success, message) = match result {
-                            Ok(_) => (true, format!("删除本地分支成功：{}", name_for_result)),
-                            Err(e) => (false, format!("删除本地分支失败：{}: {}", name_for_result, e)),
-                        };
-                        Message::BranchDeleted {
-                            branch_name: name_for_result,
-                            success,
-                            message,
-                        }
-                    },
-                );
-
                 if delete_remote {
-                    // 如果需要删除远程分支，再执行远程删除
+                    // D 删除：直接删除远程分支（无论是否有本地分支）
                     let name_for_remote = branch_name.clone();
                     let name_for_remote_result = branch_name;
-                    let delete_remote_cmd = Command::perform(
+                    Command::perform(
                         move || crate::git::delete_remote_branch_inner(&name_for_remote, &remote_name_for_delete),
                         move |result| {
                             let (success, message) = match result {
@@ -601,10 +597,23 @@ fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<
                                 message,
                             }
                         },
-                    );
-                    Command::batch(vec![delete_local, delete_remote_cmd])
+                    )
                 } else {
-                    delete_local
+                    // d 删除：只删除本地分支
+                    Command::perform(
+                        move || crate::git::delete_local_branch_inner(&name, false),
+                        move |result| {
+                            let (success, message) = match result {
+                                Ok(_) => (true, format!("删除本地分支成功：{}", name_for_result)),
+                                Err(e) => (false, format!("删除本地分支失败：{}: {}", name_for_result, e)),
+                            };
+                            Message::BranchDeleted {
+                                branch_name: name_for_result,
+                                success,
+                                message,
+                            }
+                        },
+                    )
                 }
             })
             .collect(),

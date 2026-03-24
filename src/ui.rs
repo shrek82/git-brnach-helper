@@ -366,7 +366,7 @@ fn draw_help_overlay(f: &mut Frame) {
         ]),
         Line::from(vec![
             Span::styled("  D        ", Style::default().fg(Color::Red)),
-            Span::raw("删除本地 + 远程分支"),
+            Span::raw("删除选中的远程分支"),
         ]),
         Line::from(vec![
             Span::styled("  l        ", Style::default().fg(Color::Yellow)),
@@ -425,7 +425,7 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
         height: popup_height.min(area.height),
     };
 
-    let delete_type = if delete_remote { "本地 + 远程" } else { "本地" };
+    let delete_type = if delete_remote { "远程分支" } else { "本地分支" };
 
     let confirm_lines = vec![
         Line::from(""),
