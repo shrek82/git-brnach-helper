@@ -412,9 +412,9 @@ fn draw_help_overlay(f: &mut Frame) {
 fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let area = f.area();
 
-    // 计算居中弹窗大小
-    let popup_width = 60;
-    let popup_height = 10;
+    // 计算居中弹窗大小 - 紧凑设计
+    let popup_width = 48;
+    let popup_height = 7;
     let popup_x = (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = (area.height.saturating_sub(popup_height)) / 2;
 
@@ -425,22 +425,20 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
         height: popup_height.min(area.height),
     };
 
-    let delete_type = if delete_remote {
-        "本地 + 远程分支"
-    } else {
-        "本地分支"
-    };
+    let delete_type = if delete_remote { "本地 + 远程" } else { "本地" };
 
     let confirm_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("⚠️  确认删除 ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{} 个{}？", count, delete_type)),
+            Span::styled("删除 ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{} 个{} ", count, delete_type), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("？", Style::default().fg(Color::White)),
         ]),
-        Line::from(""),
         Line::from(vec![
-            Span::styled("  [y] 确认删除  ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(" [n] 取消  ", Style::default().fg(Color::Gray)),
+            Span::raw("  "),
+            Span::styled("Y 确认", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw("  •  "),
+            Span::styled("N 取消", Style::default().fg(Color::Gray)),
         ]),
         Line::from(""),
     ];
@@ -448,10 +446,9 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
     let confirm_dialog = Paragraph::new(confirm_lines)
         .block(
             Block::default()
-                .title(" ⚠️  删除确认 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red))
-                .style(Style::default().bg(Color::Rgb(80, 0, 0))),  // 深红色背景
+                .style(Style::default().bg(Color::Rgb(60, 0, 0))),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
