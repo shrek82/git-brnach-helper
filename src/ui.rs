@@ -254,7 +254,7 @@ fn draw_operation_log(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let log_widget = Paragraph::new(log_content)
         .block(
             Block::default()
-                .title(" 📋 操作日志 (Shift+ 鼠标选择文本可复制) ")
+                .title(" 📋 操作日志 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan)),
         )
