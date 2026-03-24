@@ -51,6 +51,17 @@ pub fn list_remote_branches(remote_name: &str) -> Result<Vec<String>> {
 /// remote_ref: 远程分支引用，如 "origin/feature/login"
 /// branch_name: 新本地分支名称，如 "feature/login"
 pub fn create_local_branch(remote_ref: &str, branch_name: &str) -> Result<()> {
+    // 检查本地是否已存在同名分支
+    let check_local_output = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch_name)])
+        .output();
+
+    if let Ok(output) = check_local_output {
+        if output.status.success() {
+            anyhow::bail!("本地分支 '{}' 已存在，无法重复创建", branch_name);
+        }
+    }
+
     // 使用 git 命令创建，更可靠
     // 先检查远程引用是否存在
     let check_output = Command::new("git")
@@ -104,6 +115,11 @@ pub fn list_local_branches() -> Result<Vec<String>> {
 /// branch_name: 本地分支名称，如 "feature/login"
 /// 注意：此函数会切换到目标分支执行 pull
 pub fn sync_local_branch(branch_name: &str) -> Result<()> {
+    // 检查未提交修改
+    if has_uncommitted_changes()? {
+        anyhow::bail!("当前工作树有未提交的修改，请先提交或暂存后再同步分支");
+    }
+
     // 获取当前分支
     let current_branch_output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -186,6 +202,12 @@ pub fn delete_local_branch(branch_name: &str, force: bool) -> Result<()> {
 /// branch_name: 要删除的分支名称，如 "feature/login"
 /// remote_name: 远程仓库名称，如 "origin"
 pub fn delete_remote_branch(branch_name: &str, remote_name: &str) -> Result<()> {
+    // 检查是否是受保护的远程分支
+    const PROTECTED: [&str; 4] = ["main", "master", "develop", "dev"];
+    if PROTECTED.contains(&branch_name) {
+        anyhow::bail!("不能删除受保护的远程分支 '{}'", branch_name);
+    }
+
     let output = Command::new("git")
         .args(["push", remote_name, "--delete", branch_name])
         .output()

@@ -500,7 +500,7 @@ fn checkout_current_branch(state: &AppState) -> Command<Message> {
 
 fn request_delete_branches(state: &mut AppState, delete_remote: bool) -> Command<Message> {
     let to_delete: Vec<String> = if delete_remote {
-        // D 删除：可以删除纯远程分支（无需本地分支）
+        // D 删除：可以删除纯远程分支（无需本地分支），但受保护分支除外
         state.branches.items
             .iter()
             .filter(|b| b.selected && !state.is_protected_branch(&b.short_name))
