@@ -81,6 +81,8 @@ pub struct App {
     pub fetched_from_remote: bool,
     /// 当前所在的分支名称
     pub current_branch: String,
+    /// 快速模式（true=不清空列表，不加载提交信息）
+    pub quick_mode: bool,
 }
 
 impl App {
@@ -116,6 +118,7 @@ impl App {
             load_ahead_behind_receiver: None,
             fetched_from_remote: false,
             current_branch: String::from("unknown"),
+            quick_mode: false,
         }
     }
 
@@ -665,11 +668,21 @@ impl Default for App {
 impl App {
     /// 开始异步加载分支列表
     /// `fetch_remote` 控制是否先 fetch 远程（true=先请求远程，false=使用本地缓存）
+    /// `quick_mode` 控制是否快速加载（true=不清空列表，不加载提交信息）
     pub fn start_loading_branches(&mut self, fetch_remote: bool) {
+        self.quick_mode = !fetch_remote; // 按 l 键时启用快速模式
         self.is_loading = true;
-        self.loading_message = String::from("正在加载分支列表...");
-        self.remote_branches.clear();
-        self.all_branches.clear();
+        self.loading_message = if fetch_remote {
+            String::from("正在同步远程仓库...")
+        } else {
+            String::from("正在加载分支列表...")
+        };
+
+        // 快速模式下不清空列表，保持显示
+        if !self.quick_mode {
+            self.remote_branches.clear();
+            self.all_branches.clear();
+        }
 
         let remote_name = self.remote_name.clone();
         let (tx, rx) = mpsc::channel();
@@ -809,8 +822,17 @@ impl App {
                         self.is_loading = false;
                         self.loading_message.clear();
                         self.fetched_from_remote = true;
-                        self.load_ahead_behind_for_visible();
-                        self.status_message = format!("已加载 {} 个分支（已同步远程）", self.remote_branches.len());
+
+                        // 快速模式下不加载提交信息和 ahead/behind，加快速度
+                        if !self.quick_mode {
+                            self.load_ahead_behind_for_visible();
+                        }
+
+                        self.status_message = if self.quick_mode {
+                            format!("已加载 {} 个分支（本地缓存）", self.remote_branches.len())
+                        } else {
+                            format!("已加载 {} 个分支（已同步远程）", self.remote_branches.len())
+                        };
                         changed = true;
                     }
                     Ok(Err(e)) => {
@@ -838,8 +860,6 @@ impl App {
                     // 更新分支数据
                     self.all_branches = branches.clone();
                     self.apply_filter();
-                    // 保持接收器以便后续更新（如果需要）
-                    // self.load_ahead_behind_receiver = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     self.load_ahead_behind_receiver = Some(rx);
