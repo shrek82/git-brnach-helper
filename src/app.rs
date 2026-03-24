@@ -896,7 +896,39 @@ impl App {
             if let Some(rx) = self.load_receiver.take() {
                 match rx.try_recv() {
                     Ok(Ok(branches)) => {
-                        self.all_branches = branches;
+                        // 快速模式下，保留已有的提交信息
+                        if self.quick_mode && !self.all_branches.is_empty() {
+                            // 构建一个映射，保留旧数据中的提交信息
+                            use std::collections::HashMap;
+                            let mut commit_info_map: HashMap<String, (String, String, String)> = HashMap::new();
+                            for old_branch in &self.all_branches {
+                                commit_info_map.insert(
+                                    old_branch.short_name.clone(),
+                                    (
+                                        old_branch.last_commit_time.clone(),
+                                        old_branch.last_commit_author.clone(),
+                                        old_branch.last_commit_message.clone(),
+                                    ),
+                                );
+                            }
+
+                            // 更新 branches，保留已有的提交信息
+                            let mut new_branches = branches;
+                            for branch in &mut new_branches {
+                                if let Some((time, author, message)) = commit_info_map.get(&branch.short_name) {
+                                    // 只有当新数据是"-"时，才使用旧数据
+                                    if branch.last_commit_time == "-" {
+                                        branch.last_commit_time = time.clone();
+                                        branch.last_commit_author = author.clone();
+                                        branch.last_commit_message = message.clone();
+                                    }
+                                }
+                            }
+
+                            self.all_branches = new_branches;
+                        } else {
+                            self.all_branches = branches;
+                        }
                         self.apply_filter();
                         self.is_loading = false;
                         self.loading_message.clear();
