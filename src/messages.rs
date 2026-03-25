@@ -31,18 +31,21 @@ pub enum Message {
         branch_name: String,
         success: bool,
         message: String,
+        progress: Option<(usize, usize)>,  // (当前进度，总数)
     },
     /// 分支同步完成
     BranchSynced {
         branch_name: String,
         success: bool,
         message: String,
+        progress: Option<(usize, usize)>,  // (当前进度，总数)
     },
     /// 分支删除完成
     BranchDeleted {
         branch_name: String,
         success: bool,
         message: String,
+        progress: Option<(usize, usize)>,  // (当前进度，总数)
     },
     /// 分支切换完成
     BranchCheckedOut {

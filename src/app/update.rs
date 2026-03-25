@@ -87,6 +87,7 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             branch_name,
             success,
             message,
+            progress,
         } => {
             if success {
                 state.branches.update_branch(&branch_name, |branch| {
@@ -96,6 +97,21 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
                 });
             }
             state.add_log(&message);
+            // 更新进度状态
+            if let Some((current, total)) = progress {
+                if current >= total {
+                    // 完成，清除加载状态
+                    state.branches.loading_state = crate::domain::LoadingState::Loaded {
+                        last_updated: Instant::now(),
+                    };
+                } else {
+                    // 更新进度
+                    state.branches.loading_state = crate::domain::LoadingState::Loading {
+                        progress: (current as u8 * 100 / total as u8).min(100),
+                        message: format!("正在创建分支... {}/{}", current, total),
+                    };
+                }
+            }
             Command::none()
         }
 
@@ -103,11 +119,27 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             branch_name,
             success,
             message,
+            progress,
         } => {
             if success {
                 state.add_log(&format!("同步分支成功：{}", branch_name));
             } else {
                 state.add_log(&message);
+            }
+            // 更新进度状态
+            if let Some((current, total)) = progress {
+                if current >= total {
+                    // 完成，清除加载状态
+                    state.branches.loading_state = crate::domain::LoadingState::Loaded {
+                        last_updated: Instant::now(),
+                    };
+                } else {
+                    // 更新进度
+                    state.branches.loading_state = crate::domain::LoadingState::Loading {
+                        progress: (current as u8 * 100 / total as u8).min(100),
+                        message: format!("正在同步分支... {}/{}", current, total),
+                    };
+                }
             }
             Command::none()
         }
@@ -116,6 +148,7 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
             branch_name,
             success,
             message,
+            progress,
         } => {
             if success {
                 state.add_log(&message);
@@ -133,6 +166,21 @@ pub fn update(state: &mut AppState, msg: Message) -> Command<Message> {
                 }
             } else {
                 state.add_log(&message);
+            }
+            // 更新进度状态
+            if let Some((current, total)) = progress {
+                if current >= total {
+                    // 完成，清除加载状态
+                    state.branches.loading_state = crate::domain::LoadingState::Loaded {
+                        last_updated: Instant::now(),
+                    };
+                } else {
+                    // 更新进度
+                    state.branches.loading_state = crate::domain::LoadingState::Loading {
+                        progress: (current as u8 * 100 / total as u8).min(100),
+                        message: format!("正在删除分支... {}/{}", current, total),
+                    };
+                }
             }
             Command::none()
         }
@@ -185,7 +233,13 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
             ModalState::DeleteConfirm { branches, delete_remote } => {
                 match key {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
-                        // 确认删除：执行批量删除
+                        // 确认删除：先设置加载状态，然后执行批量删除
+                        let total = branches.len();
+                        let delete_type = if delete_remote { "删除远程" } else { "删除本地" };
+                        state.branches.loading_state = crate::domain::LoadingState::Loading {
+                            progress: 0,
+                            message: format!("正在{} {} 个分支...", delete_type, total),
+                        };
                         return delete_branches_inner(branches, delete_remote);
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -393,7 +447,7 @@ fn load_commit_info_for_visible(state: &AppState) -> Command<Message> {
 
 // === 辅助函数：分支操作 ===
 
-fn sync_selected_branches(state: &AppState) -> Command<Message> {
+fn sync_selected_branches(state: &mut AppState) -> Command<Message> {
     let to_sync: Vec<String> = state
         .branches
         .items
@@ -414,12 +468,21 @@ fn sync_selected_branches(state: &AppState) -> Command<Message> {
         return Command::none();
     }
 
+    let total = to_sync.len() + to_create_and_sync.len();
+    let to_sync_len = to_sync.len();
+    // 设置加载状态，显示进度
+    state.branches.loading_state = crate::domain::LoadingState::Loading {
+        progress: 0,
+        message: format!("正在同步/创建 {} 个分支...", total),
+    };
+
     let mut all_commands = Vec::new();
 
     // 同步已有本地分支的命令
-    for branch_name in to_sync {
+    for (i, branch_name) in to_sync.into_iter().enumerate() {
         let name = branch_name.clone();
         let name_for_result = name.clone();
+        let progress = i + 1;
         all_commands.push(Command::perform(
             move || crate::git::sync_local_branch_inner(&name),
             move |result| {
@@ -431,16 +494,18 @@ fn sync_selected_branches(state: &AppState) -> Command<Message> {
                     branch_name: name_for_result,
                     success,
                     message,
+                    progress: Some((progress, total)),
                 }
             },
         ));
     }
 
     // 创建新分支的命令
-    for (remote_ref, branch_name) in to_create_and_sync {
+    for (i, (remote_ref, branch_name)) in to_create_and_sync.into_iter().enumerate() {
         let name = branch_name.clone();
         let ref_name = remote_ref.clone();
         let name_for_result = name.clone();
+        let progress = to_sync_len + i + 1;
         all_commands.push(Command::perform(
             move || crate::git::create_local_branch_inner(&ref_name, &name),
             move |result| {
@@ -452,6 +517,7 @@ fn sync_selected_branches(state: &AppState) -> Command<Message> {
                     branch_name: name_for_result,
                     success,
                     message,
+                    progress: Some((progress, total)),
                 }
             },
         ));
@@ -460,7 +526,7 @@ fn sync_selected_branches(state: &AppState) -> Command<Message> {
     Command::batch(all_commands)
 }
 
-fn create_selected_branches(state: &AppState) -> Command<Message> {
+fn create_selected_branches(state: &mut AppState) -> Command<Message> {
     let to_create: Vec<(String, String)> = state
         .branches
         .items
@@ -473,13 +539,22 @@ fn create_selected_branches(state: &AppState) -> Command<Message> {
         return Command::none();
     }
 
+    let total = to_create.len();
+    // 设置加载状态，显示进度
+    state.branches.loading_state = crate::domain::LoadingState::Loading {
+        progress: 0,
+        message: format!("正在创建 {} 个分支...", total),
+    };
+
     Command::batch(
         to_create
             .into_iter()
-            .map(|(remote_ref, branch_name)| {
+            .enumerate()
+            .map(move |(i, (remote_ref, branch_name))| {
                 let name = branch_name.clone();
                 let ref_name = remote_ref.clone();
                 let name_for_result = name.clone();
+                let progress = i + 1;
                 Command::perform(
                     move || crate::git::create_local_branch_inner(&ref_name, &name),
                     move |result| {
@@ -491,6 +566,7 @@ fn create_selected_branches(state: &AppState) -> Command<Message> {
                             branch_name: name_for_result,
                             success,
                             message,
+                            progress: Some((progress, total)),
                         }
                     },
                 )
@@ -607,24 +683,30 @@ fn show_branch_detail(state: &mut AppState) -> Command<Message> {
     )
 }
 
-/// 删除分支的内部实现
+/// 删除分支的内部实现 - 返回删除命令和相关信息
 fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<Message> {
     if branches.is_empty() {
         return Command::none();
     }
 
     let remote_name = String::from("origin");
+    let total = branches.len();
 
+    // 创建一个命令来设置初始加载状态，然后执行删除
+    // 由于 Command::batch 会并行执行所有命令，我们需要使用顺序执行的方式
+    // 这里我们直接在每个命令的消息处理中更新进度，第一个命令会设置初始状态
+    
     Command::batch(
         branches
             .into_iter()
-            .map(move |branch_name| {
+            .enumerate()
+            .map(move |(i, branch_name)| {
                 let name = branch_name.clone();
                 let name_for_result = name.clone();
                 let remote_name_for_delete = remote_name.clone();
+                let progress = i + 1;
 
                 if delete_remote {
-                    // D 删除：直接删除远程分支（无论是否有本地分支）
                     let name_for_remote = branch_name.clone();
                     let name_for_remote_result = branch_name;
                     Command::perform(
@@ -638,11 +720,11 @@ fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<
                                 branch_name: name_for_remote_result,
                                 success,
                                 message,
+                                progress: Some((progress, total)),
                             }
                         },
                     )
                 } else {
-                    // d 删除：只删除本地分支
                     Command::perform(
                         move || crate::git::delete_local_branch_inner(&name, false),
                         move |result| {
@@ -654,6 +736,7 @@ fn delete_branches_inner(branches: Vec<String>, delete_remote: bool) -> Command<
                                 branch_name: name_for_result,
                                 success,
                                 message,
+                                progress: Some((progress, total)),
                             }
                         },
                     )
