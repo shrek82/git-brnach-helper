@@ -198,6 +198,22 @@ pub fn delete_local_branch(branch_name: &str, force: bool) -> Result<()> {
     }
 }
 
+/// 对所有分支执行 git fetch
+pub fn fetch_all_branches(_remote_name: &str) -> Result<()> {
+    // 使用 git fetch --all 获取所有远程分支
+    let output = Command::new("git")
+        .args(["fetch", "--all", "--quiet"])
+        .output()
+        .context("执行 git fetch 命令失败")?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("fetch 所有分支失败：{}", stderr.trim())
+    }
+}
+
 /// 删除远程分支
 /// branch_name: 要删除的分支名称，如 "feature/login"
 /// remote_name: 远程仓库名称，如 "origin"

@@ -212,6 +212,26 @@ fn handle_key_press(state: &mut AppState, key: KeyCode) -> Command<Message> {
             return Command::perform(|| (), |_| Message::Quit);
         }
 
+        KeyCode::Char('f') => {
+            // fetch 所有分支
+            state.branches.loading_state = crate::domain::LoadingState::Loading {
+                progress: 0,
+                message: String::from("正在 fetch 所有分支..."),
+            };
+            let remote_name = state.remote_name.clone();
+            let remote_name_for_task = remote_name.clone();
+            Command::perform(
+                move || crate::git::fetch_all_branches(&remote_name),
+                move |_| {
+                    let remote_name_for_list = remote_name_for_task.clone();
+                    match crate::git::list_local_branches_inner(&remote_name_for_list) {
+                        Ok(branches) => Message::BranchesLoaded(Ok(branches)),
+                        Err(e) => Message::BranchesLoaded(Err(e.to_string())),
+                    }
+                },
+            )
+        }
+
         KeyCode::Char('l') => {
             // 获取本地分支（不 fetch 远程）
             state.branches.loading_state = crate::domain::LoadingState::Loading {

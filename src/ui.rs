@@ -290,6 +290,8 @@ fn draw_help(f: &mut Frame, area: ratatui::layout::Rect) {
         Span::raw("删本地  "),
         Span::styled(" D ", Style::default().fg(Color::Red)),
         Span::raw("删远程  "),
+        Span::styled(" f ", Style::default().fg(Color::Cyan)),
+        Span::raw("Fetch  "),
         Span::styled(" / ", Style::default().fg(Color::Yellow)),
         Span::raw("过滤  "),
         Span::styled(" l ", Style::default().fg(Color::Yellow)),
@@ -367,6 +369,10 @@ fn draw_help_overlay(f: &mut Frame) {
         Line::from(vec![
             Span::styled("  D        ", Style::default().fg(Color::Red)),
             Span::raw("删除选中的远程分支"),
+        ]),
+        Line::from(vec![
+            Span::styled("  f        ", Style::default().fg(Color::Cyan)),
+            Span::raw("Fetch 所有分支"),
         ]),
         Line::from(vec![
             Span::styled("  l        ", Style::default().fg(Color::Yellow)),
