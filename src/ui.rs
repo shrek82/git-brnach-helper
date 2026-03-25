@@ -7,7 +7,7 @@ use ratatui::{
     prelude::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Row, Table, TableState, Cell},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState, Cell, Clear},
     Frame,
 };
 
@@ -400,13 +400,16 @@ fn draw_help_overlay(f: &mut Frame) {
         ]),
     ];
 
+    // 先绘制 Clear 遮罩层，覆盖后面的内容
+    f.render_widget(Clear, popup_area);
+
     let help_overlay = Paragraph::new(help_lines)
         .block(
             Block::default()
                 .title(" 帮助 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .style(Style::default().bg(Color::DarkGray)),
+                .style(Style::default().bg(Color::Black)),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Left);
@@ -431,6 +434,9 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
         height: popup_height.min(area.height),
     };
 
+    // 先绘制 Clear 遮罩层，覆盖后面的内容
+    f.render_widget(Clear, popup_area);
+
     let delete_type = if delete_remote { "远程分支" } else { "本地分支" };
 
     let confirm_lines = vec![
@@ -454,7 +460,7 @@ fn draw_delete_confirm(f: &mut Frame, count: usize, delete_remote: bool) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-                .style(Style::default().bg(Color::Rgb(50, 0, 0))),
+                .style(Style::default().bg(Color::Black)),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
@@ -513,13 +519,16 @@ fn draw_branch_detail(f: &mut Frame, branch_name: &str, commits: &[String]) {
         Span::styled("  按任意键关闭", Style::default().fg(Color::DarkGray)),
     ]));
 
+    // 先绘制 Clear 遮罩层，覆盖后面的内容
+    f.render_widget(Clear, popup_area);
+
     let detail_dialog = Paragraph::new(detail_lines)
         .block(
             Block::default()
                 .title(" 分支详情 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .style(Style::default().bg(Color::DarkGray)),
+                .style(Style::default().bg(Color::Black)),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Left);
@@ -543,6 +552,9 @@ fn draw_loading(f: &mut Frame, loading_state: &crate::domain::LoadingState) {
         width: popup_width.min(area.width),
         height: popup_height.min(area.height),
     };
+
+    // 先绘制 Clear 遮罩层，覆盖后面的内容
+    f.render_widget(Clear, popup_area);
 
     let message = match loading_state {
         crate::domain::LoadingState::Loading { message, .. } => message.clone(),
@@ -572,7 +584,7 @@ fn draw_loading(f: &mut Frame, loading_state: &crate::domain::LoadingState) {
                 .title(" 加载中 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .style(Style::default().bg(Color::DarkGray)),
+                .style(Style::default().bg(Color::Black)),
         )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
