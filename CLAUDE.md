@@ -74,3 +74,30 @@ src/
 2. **远程仓库名称**：通过 `app.remote_name` 配置（默认 `origin`）
 3. **异步加载**：启动时不阻塞 UI，通过 `mpsc::channel` 后台获取分支数据
 4. **操作日志**：保留最近 10 条记录，显示在界面底部
+
+## 架构模式
+
+**Elm 架构（Model-View-Update）**：
+- `Model` = `AppState`（单一数据源）
+- `Msg` = `Message` 枚举（所有状态变更入口）
+- `Update` = `update()` 函数（纯函数，处理消息返回 `Command`）
+- `View` = `draw()` 函数（声明式渲染）
+- `Command` = 异步操作封装（通过 channel 发送消息）
+
+**数据流**：`用户输入/异步完成` → `Message` → `update()` → `Command` → `Message` → ...
+
+## 模块依赖关系
+
+```
+main.rs (入口)
+  ├── app (状态管理 + 更新逻辑)
+  │   ├── state.rs (AppState)
+  │   ├── commands.rs (Command 异步抽象)
+  │   └── update.rs (消息处理)
+  ├── domain (领域模型)
+  │   ├── branch.rs (RemoteBranch, BranchList)
+  │   └── loading.rs (LoadingState, SortField)
+  ├── git (Git 命令封装)
+  ├── messages (Message 定义)
+  └── ui (渲染)
+```
